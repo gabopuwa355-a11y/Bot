@@ -2237,7 +2237,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cur.execute("""
     INSERT INTO registrations(
         user_id, first_name, last_name, email, password, created_at, state
-    ) VALUES(?,?,?,?,?,?,?)
+    ) VALUES(?,?,?,?,?,?)
     """, (
         user.id,
         data["name"],
