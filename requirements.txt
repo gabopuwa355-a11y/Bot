@@ -1,4 +1,4 @@
-python-telegram-bot[webhooks]==20.7
+python-telegram-bot[job-queue]==20.7
 psycopg2-binary
 google-api-python-client
 google-auth
