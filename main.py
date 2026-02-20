@@ -1096,11 +1096,32 @@ async def smtp_bounce_check_fast(recipient: str, token: str) -> str:
 EMAIL_HANDLE_RE = re.compile(r"\b([a-z0-9._%+\-]{2,64})@gmail\.com\b", re.I)
 
 def _pg_conn():
-    # Railway provides DATABASE_URL
     import os
     import psycopg2
-    return psycopg2.connect(os.environ["DATABASE_URL"])
 
+    dsn = (
+        os.environ.get("DATABASE_URL")
+        or os.environ.get("DATABASE_URL")  # if you used old name anywhere
+        or os.environ.get("POSTGRES_URL")
+        or os.environ.get("PGDATABASE_URL")
+    )
+
+    if not dsn:
+        # Very clear error (no silent localhost socket)
+        raise RuntimeError(
+            "DATABASE_URL missing in Railway Variables. "
+            "Set DATABASE_URL = ${{ Postgres.DATABASE_URL }} in WEB service."
+        )
+
+    # If user mistakenly pasted Railway template string literally, catch it:
+    if "${{" in dsn or "Postgres.DATABASE_URL" in dsn:
+        raise RuntimeError(
+            "DATABASE_URL is set to a Railway template string literally. "
+            "Use Railway Variables -> Shared Variable: DATABASE_URL = ${{ Postgres.DATABASE_URL }} "
+            "(do not paste this into code; set it in Variables UI)."
+        )
+
+    return psycopg2.connect(dsn)
 def _pg_email_init():
     """Create tables used by the email-handle cache."""
     with _pg_conn() as conn:
