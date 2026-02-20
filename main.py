@@ -3997,26 +3997,30 @@ def main():
     except Exception:
         pass
 
-    # =========================
+# =========================
     # WEBHOOK (Railway)
     # =========================
     print("✅ Bot started (WEBHOOK)...")
 
-port = int(os.environ.get("PORT", "8080"))
-railway_static = os.environ.get("RAILWAY_STATIC_URL")  # e.g. myapp.up.railway.app
-if not railway_static:
-    raise RuntimeError("RAILWAY_STATIC_URL missing (without https://)")
+    port = int(os.environ.get("PORT", "8080"))
+    railway_static = os.environ.get("RAILWAY_STATIC_URL")  # e.g. myapp.up.railway.app
+    if not railway_static:
+        raise RuntimeError("RAILWAY_STATIC_URL missing (without https://)")
 
-# ✅ base URL only
-webhook_base = f"https://{railway_static}"
+    # ✅ base URL only
+    webhook_base = f"https://{railway_static}"
 
-# ✅ secret path (BOT_TOKEN mat bhi rakhna ho to alag secret bhi rakh sakte ho)
-url_path = os.environ.get("WEBHOOK_PATH", BOT_TOKEN)
+    # ✅ secret path
+    url_path = os.environ.get("WEBHOOK_PATH", BOT_TOKEN)
 
-app.run_webhook(
-    listen="0.0.0.0",
-    port=port,
-    url_path=url_path,
-    webhook_url=webhook_base,
-    drop_pending_updates=True,
-)
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=url_path,
+        webhook_url=webhook_base,
+        drop_pending_updates=True,
+    )
+
+
+if __name__ == "__main__":
+    main()
