@@ -4002,22 +4002,21 @@ def main():
     # =========================
     print("✅ Bot started (WEBHOOK)...")
 
-    port = int(os.environ.get("PORT", "8080"))
+port = int(os.environ.get("PORT", "8080"))
+railway_static = os.environ.get("RAILWAY_STATIC_URL")  # e.g. myapp.up.railway.app
+if not railway_static:
+    raise RuntimeError("RAILWAY_STATIC_URL missing (without https://)")
 
-    # Railway usually provides this. If not present, set it manually in Railway Variables.
-    railway_static = os.environ.get("RAILWAY_STATIC_URL")  # example: "your-app.up.railway.app"
-    if not railway_static:
-        raise RuntimeError("RAILWAY_STATIC_URL missing. Add it in Railway Variables (without https://)")
+# ✅ base URL only
+webhook_base = f"https://{railway_static}"
 
-    webhook_url = f"https://{railway_static}/{BOT_TOKEN}"
+# ✅ secret path (BOT_TOKEN mat bhi rakhna ho to alag secret bhi rakh sakte ho)
+url_path = os.environ.get("WEBHOOK_PATH", BOT_TOKEN)
 
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        webhook_url=webhook_url,
-        drop_pending_updates=True,
-    )
-
-
-if __name__ == "__main__":
-    main()
+app.run_webhook(
+    listen="0.0.0.0",
+    port=port,
+    url_path=url_path,
+    webhook_url=webhook_base,
+    drop_pending_updates=True,
+)
