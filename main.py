@@ -1099,29 +1099,9 @@ def _pg_conn():
     import os
     import psycopg2
 
-    dsn = (
-        os.environ.get("DATABASE_URL")
-        or os.environ.get("DATABASE_URL")  # if you used old name anywhere
-        or os.environ.get("POSTGRES_URL")
-        or os.environ.get("PGDATABASE_URL")
-    )
+    print("DEBUG ENV:", os.environ.get("DATABASE_URL"))
 
-    if not dsn:
-        # Very clear error (no silent localhost socket)
-        raise RuntimeError(
-            "DATABASE_URL missing in Railway Variables. "
-            "Set DATABASE_URL = ${{ Postgres.DATABASE_URL }} in WEB service."
-        )
-
-    # If user mistakenly pasted Railway template string literally, catch it:
-    if "${{" in dsn or "Postgres.DATABASE_URL" in dsn:
-        raise RuntimeError(
-            "DATABASE_URL is set to a Railway template string literally. "
-            "Use Railway Variables -> Shared Variable: DATABASE_URL = ${{ Postgres.DATABASE_URL }} "
-            "(do not paste this into code; set it in Variables UI)."
-        )
-
-    return psycopg2.connect(dsn)
+    return psycopg2.connect(os.environ["DATABASE_URL"])
 def _pg_email_init():
     """Create tables used by the email-handle cache."""
     with _pg_conn() as conn:
