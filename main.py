@@ -3999,17 +3999,22 @@ def main():
 
     print("✅ Bot started (Railway Webhook)...")
 
-    PORT = int(os.environ.get("PORT", "8000"))
-    PUBLIC_URL = os.environ.get("RAILWAY_STATIC_URL")
+PORT = int(os.environ.get("PORT", "8000"))
+PUBLIC_URL = os.environ.get("RAILWAY_STATIC_URL")
 
-    if PUBLIC_URL:
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            webhook_url=f"https://{PUBLIC_URL}/"
-        )
-    else:
-        app.run_polling()
+if PUBLIC_URL:
+    url_path = os.environ.get("WEBHOOK_PATH", "hook_92ks8s9d7sd")  # or BOT_TOKEN
+    webhook_full = f"https://{PUBLIC_URL}/{url_path}"
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=url_path,
+        webhook_url=webhook_full,
+        drop_pending_updates=True,
+    )
+else:
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
