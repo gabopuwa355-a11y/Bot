@@ -47,7 +47,7 @@ except Exception:
 # =========================
 # CONFIG (NO .env)
 # =========================
-BOT_TOKEN = "8182599906:AAGMU6PRt9_VB9-rcPEsr2jIZxLdlwBbirc"
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").strip("@")  # optional
 ADMIN_ID = 7988263992  # only admin access
 PIN_CHAT_ID = None  # set to a group/channel id (bot must be admin) to pin messages there
