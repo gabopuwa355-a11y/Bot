@@ -4000,7 +4000,7 @@ def main():
     print("✅ Bot started (Railway Webhook)...")
 
 PORT = int(os.environ.get("PORT", "8000"))
-PUBLIC_URL = os.environ.get("RAILWAY_STATIC_URL")
+PUBLIC_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
 
 if PUBLIC_URL:
     url_path = os.environ.get("WEBHOOK_PATH", "hook_92ks8s9d7sd")  # or BOT_TOKEN
