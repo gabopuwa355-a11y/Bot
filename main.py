@@ -1,16 +1,3 @@
-
-# =========================
-# PAYOUT MENU (Reply Keyboard)
-# =========================
-def payout_menu_kb():
-    return ReplyKeyboardMarkup(
-        [
-            ["1. UPI 🚀"],
-            ["2. CRYPTO ( USDT BEP-20)"],
-            ["🔙 BACK"],
-        ],
-        resize_keyboard=True,
-    )
 # -*- coding: utf-8 -*-
 import re
 import time
