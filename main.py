@@ -1975,17 +1975,18 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reason = None
 
             line = f"• {rr['email']}  —  {status}  —  {fmt_ts(rr['stime'])}"
-            if reason:
-                line += f"
-   ❌ Reason: {reason}"
-            lines.append(line)
+if reason:
+    line += f"\n   ❌ Reason: {reason}"
 
-        msg = "📋 My accounts (page 1):
+lines.append(line)
 
-" + "
-".join(lines)
-        await update.message.reply_text(msg, reply_markup=accounts_nav(0, total))
-        return
+msg = "📋 My accounts (page 1):\n\n" + "\n".join(lines)
+
+await update.message.reply_text(
+    msg,
+    reply_markup=accounts_nav(0, total)
+)
+return
 
     if txt == "💰 Balance":
         mainb, holdb = get_balances(user.id)
