@@ -922,9 +922,8 @@ def convert_inr(amount_inr: float, to_code: str) -> float:
     _refresh_rates_if_needed()
     rate = (_rates_cache.get("rates") or {}).get(to_code)
     if not rate:
-    print("RATE NOT FOUND FOR:", to_code)
-    print("CACHE:", _rates_cache)
-    return float(amount_inr)
+        return float(amount_inr)
+    return float(amount_inr) * float(rate)
 
 def fmt_money(amount: float, code: str) -> str:
     code = (code or "INR").upper().strip()
