@@ -736,7 +736,15 @@ def balance_menu():
         [["💳 Payout", "🧾 Balance history"], ["🔙 Back"]],
         resize_keyboard=True
     )
-
+def payout_menu_kb():
+    return ReplyKeyboardMarkup(
+        [
+            ["1. UPI 🚀"],
+            ["2. CRYPTO ( USDT BEP-20)"],
+            ["🔙 BACK"],
+        ],
+        resize_keyboard=True,
+    )
 def settings_menu():
     return ReplyKeyboardMarkup([["LANGUAGE🔤"], ["💱 Currency"], ["🔙 Back"]], resize_keyboard=True)
 
