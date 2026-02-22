@@ -871,48 +871,48 @@ def set_user_currency(user_id: int, code: str):
     con.close()
 
 def _refresh_rates_if_needed():
-    """Fetch INR->X rates at most once per hour."""
     now = int(time.time())
+
     if _rates_cache["rates"] and (now - int(_rates_cache["ts"]) < 3600):
         return
 
     symbols = ",".join([c[0] for c in CURRENCY_CHOICES if c[0] != "INR"])
     api_key = (os.environ.get("CURRENCY_API_KEY") or "").strip()
 
-    try:
-        import urllib.request, urllib.parse, json as _json
+    import requests
 
+    try:
         if api_key:
-            # currencyapi.com
-            url = "https://api.currencyapi.com/v3/latest?" + urllib.parse.urlencode({
+            url = "https://api.currencyapi.com/v3/latest"
+            params = {
                 "apikey": api_key,
                 "base_currency": "INR",
                 "currencies": symbols,
-            })
-            with urllib.request.urlopen(url, timeout=12) as r:
-                data = _json.loads(r.read().decode("utf-8"))
+            }
+            r = requests.get(url, params=params, timeout=15)
+            data = r.json()
+
             rates = {}
             for k, v in (data.get("data") or {}).items():
-                try:
-                    rates[k.upper()] = float(v.get("value"))
-                except Exception:
-                    pass
+                rates[k.upper()] = float(v["value"])
+
         else:
-            # fallback: exchangerate.host (no key)
-            url = "https://api.exchangerate.host/latest?" + urllib.parse.urlencode({
+            url = "https://api.exchangerate.host/latest"
+            params = {
                 "base": "INR",
                 "symbols": symbols,
-            })
-            with urllib.request.urlopen(url, timeout=12) as r:
-                data = _json.loads(r.read().decode("utf-8"))
+            }
+            r = requests.get(url, params=params, timeout=15)
+            data = r.json()
             rates = {k.upper(): float(v) for k, v in (data.get("rates") or {}).items()}
 
-        if rates:
-            _rates_cache["ts"] = now
-            _rates_cache["base"] = "INR"
-            _rates_cache["rates"] = rates
-    except Exception:
-        # keep old cache if fetch fails
+        print("RATES LOADED:", rates)
+
+        _rates_cache["ts"] = now
+        _rates_cache["rates"] = rates
+
+    except Exception as e:
+        print("RATE FETCH ERROR:", e)
         return
 
 def convert_inr(amount_inr: float, to_code: str) -> float:
