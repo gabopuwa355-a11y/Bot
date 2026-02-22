@@ -3753,7 +3753,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(admin_top_users("monthly", 50))
         return
 
-    # All users list + search
+  #All users list + search
     if txt == "🎭ALL USER":
         rows = admin_list_users(200)
         if not rows:
@@ -3764,8 +3764,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         for i, r in enumerate(rows[:50], start=1):
             uname = (r['username'] or '').strip()
             lines.append(f"{i}. {r['user_id']} | {uname} | MAIN ₹{float(r['main_balance']):.2f} | HOLD ₹{float(r['hold_balance']):.2f}")
-        text_out="
-".join(lines)
+        text_out="\n".join(lines)
         # monospace for easy copy
         esc = lambda s: s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
         await update.message.reply_text(f"<pre>{esc(text_out)}</pre>", parse_mode="HTML")
