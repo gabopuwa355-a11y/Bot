@@ -24,6 +24,7 @@ from telegram import (
     InlineKeyboardButton,
     WebAppInfo,
 )
+BUILD_TAG = "FINAL_CLEAN_PAYOUT_ADMIN_V1"
 
 from telegram.ext import (
     Application,
