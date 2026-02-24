@@ -3264,12 +3264,12 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         allowed = (55, 110, 210, 310, 510, 1050)
         if amt not in allowed:
-            await q.message.reply_text("Invalid amount.", reply_markup=payout_amounts_kb())
+            await q.message.reply_text("Invalid amount.", reply_markup=back_only_menu())
             return
 
         mainb, _holdb = get_balances(user.id)
         if not usd_balance_sufficient(float(mainb), float(amt)):
-            await q.message.reply_text("BALANCE IS NOT SUFFICIENT FOR WITHDRAWAL 💲", reply_markup=payout_menu_kb())
+            await q.message.reply_text("BALANCE IS NOT SUFFICIENT FOR WITHDRAWAL 💲", reply_markup=back_only_menu())
             return
 
         context.user_data["await_upi"] = True
