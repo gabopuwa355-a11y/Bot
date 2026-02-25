@@ -2822,8 +2822,6 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # CALLBACKS
 # =========================
-
-
 # =========================
 # ADMIN: EMAIL ✉️ VERIFY QUEUE (30-day paging)
 # =========================
@@ -2848,17 +2846,23 @@ def _day_bounds_ts(days_ago: int):
     end = int(datetime.datetime.combine(d, datetime.time.max).timestamp())
     return d, start, end
 
+def _norm_ev_status(s: str) -> str:
+    # normalize status (handles "NOT VERIFIED", "NOT_VERIFIED", etc.)
+    return (s or "").upper().replace(" ", "_").strip()
+
 def _admin_ev_badge(cur, action_id: int) -> str:
     cur.execute("SELECT status, reason FROM admin_email_verify WHERE action_id=?", (int(action_id),))
     row = cur.fetchone()
     if row:
-        st = ((row["status"] or "")).upper().strip()
+        st = _norm_ev_status(row["status"] or "")
         rs = (row["reason"] or "").strip()
         if st == "VERIFIED":
             return "ACCEPT✅"
-        if st == "NOT_VERIFIED":
+        if st in ("NOT_VERIFIED", "REJECTED"):
             return f"❌REJECT — {rs}" if rs else "❌REJECT"
         return "PENDING ⏳"
+
+    # fallback based on actions.state ONLY (no change unless actions.state changed)
     cur.execute("SELECT state FROM actions WHERE action_id=?", (int(action_id),))
     a = cur.fetchone()
     st = (a["state"] if a else "")
@@ -2871,6 +2875,7 @@ def _admin_ev_badge(cur, action_id: int) -> str:
 async def send_admin_email_verify_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, days_ago: int = 0):
     if not is_admin(update.effective_user.id):
         return
+
     d, start_ts, end_ts = _day_bounds_ts(days_ago)
 
     con = db()
@@ -2894,9 +2899,10 @@ async def send_admin_email_verify_menu(update: Update, context: ContextTypes.DEF
     buttons = []
     for x in rows:
         st = (x["state"] or "")
-        # show only those that reached admin queue
+        # ✅ ONLY these 3 states (as you said)
         if st not in ("waiting_admin", "approved", "rejected"):
             continue
+
         badge = _admin_ev_badge(cur, int(x["action_id"]))
         email = (x["email"] or "unknown")
         body_lines.append(f"• {badge} | {email} | Action {x['action_id']}")
@@ -2907,19 +2913,13 @@ async def send_admin_email_verify_menu(update: Update, context: ContextTypes.DEF
             )
         ])
 
-    if not buttons:
-        body = "No verify-requests found for this day."
-    else:
-        body = "\n".join(body_lines[:80])
-
     con.close()
 
-    # NAV: ⏮️PREV (older) / NEXT⏭️ (newer)
+    body = "No verify-requests found for this day." if not buttons else "\n".join(body_lines[:80])
+
     nav = []
-    # PREV = older day (days_ago + 1), up to 29 (30 days window)
     if int(days_ago) < 29:
         nav.append(InlineKeyboardButton("⏮️PREV", callback_data=f"{ADMIN_EV_CB_DAY}:{int(days_ago)+1}"))
-    # NEXT = newer day (days_ago - 1), down to 0 (today)
     if int(days_ago) > 0:
         nav.append(InlineKeyboardButton("NEXT⏭️", callback_data=f"{ADMIN_EV_CB_DAY}:{int(days_ago)-1}"))
 
@@ -2967,13 +2967,18 @@ async def admin_ev_show_item(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def admin_ev_show_reasons(update: Update, context: ContextTypes.DEFAULT_TYPE, action_id: int, days_ago: int):
     q = update.callback_query
     await q.answer()
-    kb_rows = [[InlineKeyboardButton(r, callback_data=f"{ADMIN_EV_CB_REASON}:{int(action_id)}:{int(days_ago)}:{i}")]
-               for i, r in enumerate(NOT_VERIFIED_REASONS)]
+
+    kb_rows = [
+        [InlineKeyboardButton(r, callback_data=f"{ADMIN_EV_CB_REASON}:{int(action_id)}:{int(days_ago)}:{i}")]
+        for i, r in enumerate(NOT_VERIFIED_REASONS)
+    ]
     kb_rows.append([InlineKeyboardButton("BACK 🔙", callback_data=f"{ADMIN_EV_CB_ITEM}:{int(action_id)}:{int(days_ago)}")])
+
+    # ✅ IMPORTANT: ONLY show reasons here. NO DB UPDATE.
     await q.edit_message_text("Select reason:", reply_markup=InlineKeyboardMarkup(kb_rows))
 
 def _admin_ev_set_verified(cur, action_id: int, admin_id: int):
-    # Keep the existing provisional credit; mark states as approved.
+    # Mark approved
     set_action_state(int(action_id), "approved")
 
     cur.execute("SELECT reg_id, user_id FROM actions WHERE action_id=?", (int(action_id),))
@@ -3004,13 +3009,14 @@ def _admin_ev_set_verified(cur, action_id: int, admin_id: int):
                     cur.execute("UPDATE users SET main_balance=main_balance+10 WHERE user_id=?", (int(ref_id),))
                     add_ledger_entry(int(ref_id), delta_main=10.0, reason="Referral bonus")
 
+    # Save decision (ACCEPT✅)
     cur.execute(
         "INSERT OR REPLACE INTO admin_email_verify(action_id, decided_by, status, reason, decided_at) VALUES(?,?,?,?,?)",
-        (int(action_id), int(admin_id), "VERIFIED", None, int(time.time())),
+        (int(action_id), int(admin_id), "VERIFIED", "", int(time.time())),
     )
 
 def _admin_ev_set_not_verified(cur, action_id: int, admin_id: int, reason: str):
-    # Revert provisional HOLD credit
+    # Revert provisional HOLD credit + set rejected
     cur.execute("SELECT * FROM actions WHERE action_id=?", (int(action_id),))
     a = cur.fetchone()
     if a:
@@ -3026,11 +3032,15 @@ def _admin_ev_set_not_verified(cur, action_id: int, admin_id: int, reason: str):
         set_action_state(int(action_id), "rejected")
         set_reg_state(int(a["reg_id"]), "rejected")
 
+    # Save decision + reason (❌REJECT — reason)
     cur.execute(
         "INSERT OR REPLACE INTO admin_email_verify(action_id, decided_by, status, reason, decided_at) VALUES(?,?,?,?,?)",
         (int(action_id), int(admin_id), "NOT_VERIFIED", str(reason), int(time.time())),
     )
 
+# =========================
+# CALLBACKS
+# =========================
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     try:
@@ -3043,11 +3053,12 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ensure_user(user.id, user.username or user.full_name)
-    moved = move_matured_hold_to_main(user.id)
+    move_matured_hold_to_main(user.id)
+
     data = q.data or ""
 
     # =========================
-    # ADMIN: EMAIL ✉️ VERIFY (new menu)
+    # ADMIN: EMAIL ✉️ VERIFY
     # =========================
     if data.startswith(f"{ADMIN_EV_CB_DAY}:"):
         if not is_admin(user.id):
@@ -3085,9 +3096,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         con.commit()
         con.close()
 
-        # no user message on verify
-        await q.edit_message_text("✅ ACCEPT✅")
-        # go back to list
+        # ✅ go back to list (badge will show ACCEPT✅)
         await send_admin_email_verify_menu(update, context, days_ago=days_ago)
         return
 
@@ -3097,6 +3106,8 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split(":")
         action_id = int(parts[1])
         days_ago = int(parts[2]) if len(parts) > 2 else 0
+
+        # ✅ IMPORTANT: ONLY show reasons. NO DB UPDATE here.
         await admin_ev_show_reasons(update, context, action_id, days_ago)
         return
 
@@ -3107,48 +3118,20 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action_id = int(parts[1])
         days_ago = int(parts[2])
         idx = int(parts[3])
+
         reason = NOT_VERIFIED_REASONS[idx] if 0 <= idx < len(NOT_VERIFIED_REASONS) else "UNKNOWN"
 
-        # Apply reject + revert precredit
         con = db()
         cur = con.cursor()
-        # fetch user_id + email for messaging (same email that went to admin)
-        cur.execute("SELECT user_id, reg_id FROM actions WHERE action_id=?", (action_id,))
-        rowu = cur.fetchone()
-        target_user = int(rowu["user_id"]) if rowu and rowu["user_id"] is not None else None
-        reg_id = int(rowu["reg_id"]) if rowu and rowu["reg_id"] is not None else None
-
-        email_addr = None
-        if reg_id:
-            try:
-                cur.execute("SELECT email FROM registrations WHERE id=?", (reg_id,))
-                rowe = cur.fetchone()
-                email_addr = (rowe["email"] if rowe else None)
-            except Exception:
-                email_addr = None
-
         _admin_ev_set_not_verified(cur, action_id, user.id, reason)
         con.commit()
         con.close()
 
-        # (User DM disabled) Reason is stored and will be shown in 📋 My accounts.
-
+        # ✅ now update list (badge will show ❌REJECT — reason)
         await send_admin_email_verify_menu(update, context, days_ago=days_ago)
         return
 
-    if data == "ADMIN_BACK_TO_PANEL":
-        if not is_admin(user.id):
-            return
-        # Hide current menu message and show admin panel again
-        try:
-            await q.message.delete()
-        except Exception:
-            pass
-        try:
-            await context.bot.send_message(chat_id=user.id, text="Admin Panel:", reply_markup=ADMIN_MENU_KB)
-        except Exception:
-            pass
-        return
+    # ... keep your other callback handlers below ...    
     
     if data == "PROFILE_BACK":
         # Hide profile message and show main menu
