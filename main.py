@@ -2684,11 +2684,20 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # CALLBACKS
 # =========================
+def _admin_ev_set_verified(cur, action_id: int, admin_id: int):
+    # Mark approved
+    set_action_state(int(action_id), "approved")
 
-
+    cur.execute("SELECT reg_id, user_id FROM actions WHERE action_id=?", (int(action_id),))
+    a = cur.fetchone()
+    if a:
+        set_reg_state(int(a["reg_id"]), "approved")
 
         # Task rewards
-        cur.execute("SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='approved'", (int(a["user_id"]),))
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='approved'",
+            (int(a["user_id"]),),
+        )
         approved_count = int(cur.fetchone()["c"])
         apply_task_rewards(cur, int(a["user_id"]), approved_count)
 
@@ -2697,30 +2706,44 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ur = cur.fetchone()
         ref_id = ur["referrer_id"] if ur else None
         if ref_id:
-            cur.execute("SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='approved'", (int(a["user_id"]),))
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='approved'",
+                (int(a["user_id"]),),
+            )
             c = int(cur.fetchone()["c"])
             if c >= 10:
-                cur.execute("SELECT 1 FROM referral_bonuses WHERE referrer_id=? AND referred_user_id=?", (int(ref_id), int(a["user_id"])))
+                cur.execute(
+                    "SELECT 1 FROM referral_bonuses WHERE referrer_id=? AND referred_user_id=?",
+                    (int(ref_id), int(a["user_id"])),
+                )
                 already = cur.fetchone()
                 if not already:
                     cur.execute(
                         "INSERT INTO referral_bonuses(referrer_id, referred_user_id, amount, created_at) VALUES(?,?,?,?)",
                         (int(ref_id), int(a["user_id"]), 10.0, int(time.time())),
                     )
-                    cur.execute("UPDATE users SET main_balance=main_balance+10 WHERE user_id=?", (int(ref_id),))
+                    cur.execute(
+                        "UPDATE users SET main_balance=main_balance+10 WHERE user_id=?",
+                        (int(ref_id),),
+                    )
                     add_ledger_entry(int(ref_id), delta_main=10.0, reason="Referral bonus")
 
+    # Save decision
     cur.execute(
         "INSERT OR REPLACE INTO admin_email_verify(action_id, decided_by, status, reason, decided_at) VALUES(?,?,?,?,?)",
-        (int(action_id), int(admin_id), "VERIFIED", None, int(time.time())),
+        (int(action_id), int(admin_id), "VERIFIED", "", int(time.time())),
     )
+
 
 def _admin_ev_set_not_verified(cur, action_id: int, admin_id: int, reason: str):
     # Revert provisional HOLD credit
     cur.execute("SELECT * FROM actions WHERE action_id=?", (int(action_id),))
     a = cur.fetchone()
     if a:
-        cur.execute("SELECT hold_credit_id, amount, reverted FROM precredits WHERE action_id=?", (int(action_id),))
+        cur.execute(
+            "SELECT hold_credit_id, amount, reverted FROM precredits WHERE action_id=?",
+            (int(action_id),),
+        )
         pc = cur.fetchone()
         if pc and int(pc["reverted"] or 0) == 0:
             try:
@@ -2736,7 +2759,6 @@ def _admin_ev_set_not_verified(cur, action_id: int, admin_id: int, reason: str):
         "INSERT OR REPLACE INTO admin_email_verify(action_id, decided_by, status, reason, decided_at) VALUES(?,?,?,?,?)",
         (int(action_id), int(admin_id), "NOT_VERIFIED", str(reason), int(time.time())),
     )
-
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     try:
