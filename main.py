@@ -3369,7 +3369,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         mainb, _holdb = get_balances(user.id)
-        if inr_to_usd(float(mainb)) < float(amt):
+        if inr_to_inr(float(mainb)) < float(amt):
             await q.message.reply_text("BALANCE IS NOT SUFFICIENT FOR WITHDRAWAL 💲", reply_markup=payout_menu_kb())
             return
 
