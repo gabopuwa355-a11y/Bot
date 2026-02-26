@@ -3353,7 +3353,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
           
             "Now send your wallet address:,\n"
             reply_markup=back_only_menu())
-        )
         return
 
 # C) Payout amount selection
