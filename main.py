@@ -3362,7 +3362,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text("Invalid amount.", reply_markup=back_only_menu())
             return
 
-         mainb, _holdb = get_balances(user.id)
+        mainb, _holdb = get_balances(user.id)
         if float(mainb) < float(amt):
             await q.message.reply_text("BALANCE IS NOT SUFFICIENT FOR WITHDRAWAL 💲", reply_markup=back_only_menu())
             return
