@@ -2209,7 +2209,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, reply_markup=accounts_nav(0, total))
         return
 
-if txt == "💰 Balance":
+    if txt == "💰 Balance":
         mainb, holdb = get_balances(user.id)
         cur_code = get_user_currency(user.id)
         # exactly TWO TEXT lines requested
