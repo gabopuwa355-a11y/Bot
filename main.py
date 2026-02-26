@@ -3346,10 +3346,10 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         mainb, _holdb = get_balances(user.id)
         await q.message.reply_text(
-            "Wallet address like: 0xb2450F5B107b4e04087cB70cDD8E6476385236B1\n"
-            "Blockchain : BEP-20\n\n"
+            "Wallet address like: 0xb2450F5B107b4e04087cB70cDD8E6476385236B1,\n"
+            "Blockchain : BEP-20,\n\n"
           
-            "Now send your wallet address:,\n"
+            "Now send your wallet address:,\n",
             reply_markup=back_only_menu())
         return
 
