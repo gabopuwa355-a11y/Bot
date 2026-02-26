@@ -2331,11 +2331,9 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("CRYPTO ( USDT BEP-20 ) selected", reply_markup=back_only_kb())
         await update.message.reply_text(
             "Wallet address like: 0xb2450F5B107b4e04087cB70cDD8E6476385236B1,\n"
-"Blockchain : BEP-20,\n\n"
-
-"Send your BEP-20 wallet address now:,\n"
-            reply_markup=back_only_kb(),
-        )
+"Blockchain : BEP-20,\n\n",
+"Send your BEP-20 wallet address now:",
+            reply_markup=back_only_kb())
         return
 
     if context.user_data.get("payout_type_select") and txt in ("🔙 BACK", "🔙 Back", "⬅️ BACK", "⬅ BACK"):
