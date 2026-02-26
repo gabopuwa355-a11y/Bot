@@ -4050,29 +4050,29 @@ async def upi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inr_need = usd_to_inr(float(amt))
 
     if amt not in (55,110,210,310,510,1050):
-        await update.message.reply_text("Invalid amount.", reply_markup=payout_amounts_kb())
+        await update.message.reply_text("Invalid amount.", reply_markup=back_only_menu())
         return
 
       # Check balance again (safety)
     mainb, _holdb = get_balances(user.id)
     if float(mainb) < float(amt):
-        await update.message.reply_text("BALANCE IS NOT SUFFICIENT FOR WITHDRAWAL 💲", reply_markup=MAIN_MENU)
+        await update.message.reply_text("BALANCE IS NOT SUFFICIENT FOR WITHDRAWAL 💲", reply_markup=back_only_menu())
         return
 
     kind = classify_upi_or_qr(upi)
     if kind == "upi":
         if not (upi.lower().startswith("upi://") or is_valid_upi_id(upi)):
-            await update.message.reply_text("❌ INVALID UPI ID. Example: name@bank", reply_markup=
+            await update.message.reply_text("❌ INVALID UPI ID. Example: name@bank", reply_markup=back_only_menu())
             return
         if is_upi_or_qr_used(upi, "upi", user.id):
-            await update.message.reply_text("❌ THIS UPI ID IS ALREADY USED. Please enter a different UPI ID.", reply_markup=payout_selected_kb("1. UPI 🚀"))
+            await update.message.reply_text("❌ THIS UPI ID IS ALREADY USED. Please enter a different UPI ID.", reply_markup=back_only_menu())
             return
     else:
         if len(upi) < 10:
-            await update.message.reply_text("❌ INVALID QR CODE", reply_markup=payout_selected_kb("1. UPI 🚀"))
+            await update.message.reply_text("❌ INVALID QR CODE", reply_markup=back_only_menu())
             return
         if is_upi_or_qr_used(upi, "qr", user.id):
-            await update.message.reply_text("❌ THIS QR CODE IS ALREADY USED. Please send a different QR.", reply_markup=payout_selected_kb("1. UPI 🚀"))
+            await update.message.reply_text("❌ THIS QR CODE IS ALREADY USED. Please send a different QR.", reply_markup=back_only_menu())
             return
 
     now = int(time.time())
