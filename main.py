@@ -4099,8 +4099,11 @@ async def admin_content_handler(update: Update, context: ContextTypes.DEFAULT_TY
             [InlineKeyboardButton(r, callback_data=f"ADMIN_EMAIL_REASON:{action_id}:{i}")]
             for i, r in enumerate(MANUAL_EMAIL_REASONS)
         ]
-        await update.message.reply_text(f"Select reason for:
-{email}", reply_markup=InlineKeyboardMarkup(kb_rows))
+
+        await update.message.reply_text(
+            f"Select reason for:\n{email}",
+            reply_markup=InlineKeyboardMarkup(kb_rows),
+        )
         return
 
     # All users search
@@ -4109,18 +4112,27 @@ async def admin_content_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if not q:
             await update.message.reply_text("Send username or user id:")
             return
+
         res = admin_find_user(q)
         if res is None:
             await update.message.reply_text("Not found.")
             return
+
         if isinstance(res, list):
             lines = ["Search results:"]
             for r in res:
-                lines.append(f"- {r['user_id']} | {r['username'] or ''} | MAIN ₹{float(r['main_balance']):.2f} | HOLD ₹{float(r['hold_balance']):.2f}")
+                lines.append(
+                    f"- {r['user_id']} | {r['username'] or ''} | "
+                    f"MAIN ₹{float(r['main_balance']):.2f} | HOLD ₹{float(r['hold_balance']):.2f}"
+                )
             await update.message.reply_text("\n".join(lines))
         else:
             r = res
-            await update.message.reply_text(f"Found: {r['user_id']} | {r['username'] or ''}\nMAIN ₹{float(r['main_balance']):.2f} | HOLD ₹{float(r['hold_balance']):.2f}")
+            await update.message.reply_text(
+                f"Found: {r['user_id']} | {r['username'] or ''}\n"
+                f"MAIN ₹{float(r['main_balance']):.2f} | HOLD ₹{float(r['hold_balance']):.2f}"
+            )
+
         # keep in same mode so admin can search repeatedly
         return
 
