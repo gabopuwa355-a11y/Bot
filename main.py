@@ -3622,7 +3622,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await q.edit_message_text(
                     text=base_text,
                     parse_mode="Markdown",
-                    reply_markup=None)
+                    reply_markup=None))
 
             except Exception:
 
