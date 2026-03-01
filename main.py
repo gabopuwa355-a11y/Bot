@@ -3618,11 +3618,12 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
            "Gender : Your choice,\n"
            "========================\n"
            "CANCELED REGISTRATION "
+            )
            try:
                 await q.edit_message_text(
                     text=base_text,
                     parse_mode="Markdown",
-                    reply_markup=None))
+                    reply_markup=None)
 
             except Exception:
 
