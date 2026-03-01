@@ -3580,9 +3580,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if data.startswith("REG_CANCEL_SURE:"):
 
             # cancel ONLY when user confirms here
-
             set_action_state(action_id, "canceled")
-
             set_reg_state(a["reg_id"], "canceled")
 
             # Load registration from DB (so we can rebuild the original formatted text)
@@ -3600,44 +3598,40 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             first_name = _safe_code(r["first_name"] if r else "")
             last_name  = _safe_code(r["last_name"] if r else "")
             name = (first_name + " " + last_name).strip()
-           
+
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
 
             base_text = (
-           "Register account using the specified\n"
-           "data and get from ₹8 to ₹10\n\n"
-           f"Name: `{name}`\n\n"
-           f"Email: `{email}`\n\n"
-           f"Password: `{password}`\n\n"
-           "🔐 Be sure to use the specified data,\n"
-           "otherwise the account will not be paid"
-           "=========================\n"
-           "Age choose : 1990-2007\n"
-           "========================\n"
-           "Gender : Your choice,\n"
-           "========================\n"
-           "CANCELED REGISTRATION "
+                "Register account using the specified\n"
+                "data and get from ₹8 to ₹10\n\n"
+                f"Name: `{name}`\n\n"
+                f"Email: `{email}`\n\n"
+                f"Password: `{password}`\n\n"
+                "🔐 Be sure to use the specified data,\n"
+                "otherwise the account will not be paid\n"
+                "=========================\n"
+                "Age choose : 1990-2007\n"
+                "=========================\n"
+                "Gender : Your choice,\n"
+                "=========================\n"
+                "CANCELED REGISTRATION"
             )
-           try:
+
+            try:
                 await q.edit_message_text(
                     text=base_text,
                     parse_mode="Markdown",
-                    reply_markup=None)
-
+                    reply_markup=None
+                )
             except Exception:
-
                 try:
-
                     await q.edit_message_reply_markup(reply_markup=None)
-
                 except Exception:
-
                     pass
 
             return
-
-
+                    
         if data.startswith("REG_CANCEL:"):
             # show cancel confirmation buttons (do not cancel immediately)
             set_action_state(action_id, "canceled_prompt")
