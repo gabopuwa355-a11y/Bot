@@ -76,8 +76,8 @@ ADMIN_ID = 7988263992  # only admin access
 PIN_CHAT_ID = None  # set to a group/channel id (bot must be admin) to pin messages there
 # Channels gate (user must join to use bot)
 REQUIRED_CHANNELS = [
-    ("@gmail_earning", "https://t.me/gmail_earning"),
-    ("@gmailprojectnews", "https://t.me/gmailprojectnews"),
+    ("@gmailharvesterofficial", "https://t.me/gmailharvesterofficial"),
+    ("@gmailearningnews", "https://t.me/gmailearningnews"),
 ]
 
 FINGERPRINT_PUBLIC_BASE_URL = ""  # device-verify webapp disabled; keep empty to avoid NameError
