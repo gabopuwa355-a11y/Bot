@@ -2853,27 +2853,35 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if txt_is(txt, "menu_profile"):
-        mainb, holdb = get_balances(user.id)
-        total, approved, rejected, canceled = get_profile_counts(user.id)
-        total_ref, approved_any, total_bonus = _referral_stats(user.id)
-        ratio = 0.0
-        if (approved + rejected) > 0:
-            ratio = (approved / float(approved + rejected)) * 100.0
-        msg = (
-            "👤 PROFILE\n\n"
-            f"🆔 User ID: {user.id}\n"
-            f"👤 Username: {user.username or user.full_name}\n\n"
-            f"MAIN BALANCE= ₹{mainb:.2f}\n"
-            f"HOLD BALANCE= ₹{holdb:.2f}\n\n"
-            f"📌 TOTAL REGISTRATIONS: {total}\n"
-            f"✅ TOTAL APPROVED REGISTRATION: {approved}\n"
-            f"✖️ TOTAL REJECT REGISTERATION: {rejected}\n"
-            f"🚫 TOTAL CANCELED REGISTRATION: {canceled}\n"
-            f"📈 APPROVAL RATIO: {ratio:.1f}%\n\n"
-            f"👥 TOTAL REFERRALS: {total_ref}\n"
-            f"{tr(user.id, 'total_ref_earned', value=total_bonus)}"
-        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr(user.id, "profile_back"), callback_data="PROFILE_BACK")]]))
-        return
+    mainb, holdb = get_balances(user.id)
+    total, approved, rejected, canceled = get_profile_counts(user.id)
+    total_ref, approved_any, total_bonus = _referral_stats(user.id)
+    ratio = 0.0
+    if (approved + rejected) > 0:
+        ratio = (approved / float(approved + rejected)) * 100.0
+
+    msg = (
+        "👤 PROFILE\n\n"
+        f"🆔 User ID: {user.id}\n"
+        f"👤 Username: {user.username or user.full_name}\n\n"
+        f"MAIN BALANCE= ₹{mainb:.2f}\n"
+        f"HOLD BALANCE= ₹{holdb:.2f}\n\n"
+        f"📌 TOTAL REGISTRATIONS: {total}\n"
+        f"✅ TOTAL APPROVED REGISTRATION: {approved}\n"
+        f"✖️ TOTAL REJECT REGISTERATION: {rejected}\n"
+        f"🚫 TOTAL CANCELED REGISTRATION: {canceled}\n"
+        f"📈 APPROVAL RATIO: {ratio:.1f}%\n\n"
+        f"👥 TOTAL REFERRALS: {total_ref}\n"
+        f"{tr(user.id, 'total_ref_earned', value=total_bonus)}"
+    )
+
+    await update.message.reply_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(tr(user.id, "profile_back"), callback_data="PROFILE_BACK")]]
+        )
+    )
+    return
 
 
 
