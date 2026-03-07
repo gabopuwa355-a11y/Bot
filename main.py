@@ -2694,7 +2694,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # CONFIRM AGAIN  # CONFIRM AGAIN HEAVY EFFECT -> send to ADMIN for approve/reject (admin panel buttons)
 # Admin Approve -> add HOLD credit (example amount) + user notified
 # Admin Reject -> notify user
-
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not await gate_if_not_joined(update, context):
@@ -2716,10 +2715,12 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(user.id):
         if txt and not txt.startswith("/"):
             # only if not in specific flows
-            if (not context.user_data.get("reg_flow")
+            if (
+                not context.user_data.get("reg_flow")
                 and not context.user_data.get("await_upi")
                 and not context.user_data.get("await_crypto_addr")
-                and not context.user_data.get("await_crypto_amt")):
+                and not context.user_data.get("await_crypto_amt")
+            ):
                 try:
                     await send_configured_autoreply(update, context)
                 except Exception:
@@ -2746,6 +2747,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if txt_is(txt, "menu_accounts"):
         con = db()
         cur = con.cursor()
+
         # Count all relevant registrations for pagination
         cur.execute("""
             SELECT COUNT(*) AS c
@@ -2754,6 +2756,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             WHERE a.user_id=? AND a.state IN ('shown','waiting_admin','approved','rejected','canceled')
         """, (user.id,))
         total = int(cur.fetchone()["c"])
+
         if total == 0:
             con.close()
             await update.message.reply_text(tr(user.id, "my_accounts_empty"))
@@ -2780,6 +2783,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lines = []
         now_ts = int(time.time())
+
         for rr in rows:
             st = (rr["astate"] or "")
             ev_status = (rr["ev_status"] or "") or ""
@@ -2806,6 +2810,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     base_ts = int(rr["stime"] or 0)
                 except Exception:
                     base_ts = 0
+
                 if base_ts and HOLD_TO_MAIN_AFTER_DAYS:
                     until_ts = base_ts + int(HOLD_TO_MAIN_AFTER_DAYS) * 24 * 3600
                     if now_ts < until_ts:
@@ -2827,97 +2832,113 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if txt_is(txt, "menu_balance"):
-    mainb, holdb = get_balances(user.id)
-    cur_code = get_user_currency(user.id)
-    # exactly TWO TEXT lines requested
-    if cur_code and cur_code != "INR":
-        # If rate missing / API blocked, show N/A instead of wrong "same amount"
-        _refresh_rates_if_needed()
-        _rate_ok = bool((_rates_cache.get("rates") or {}).get(cur_code))
-        main_conv = convert_inr(mainb, cur_code)
-        hold_conv = convert_inr(holdb, cur_code)
-        main_disp = fmt_money(main_conv, cur_code) if _rate_ok else "N/A"
-        hold_disp = fmt_money(hold_conv, cur_code) if _rate_ok else "N/A"
-        await update.message.reply_text(
-            f"MAIN BALANCE= ₹{mainb:.2f} (≈ {main_disp})\n"
-            f"HOLD BALANCE= ₹{holdb:.2f} (≈ {hold_disp})",
-            reply_markup=balance_menu(user.id)
-        )
-    else:
-        await update.message.reply_text(
+        mainb, holdb = get_balances(user.id)
+        cur_code = get_user_currency(user.id)
+
+        # exactly TWO TEXT lines requested
+        if cur_code and cur_code != "INR":
+            # If rate missing / API blocked, show N/A instead of wrong "same amount"
+            _refresh_rates_if_needed()
+            _rate_ok = bool((_rates_cache.get("rates") or {}).get(cur_code))
+            main_conv = convert_inr(mainb, cur_code)
+            hold_conv = convert_inr(holdb, cur_code)
+            main_disp = fmt_money(main_conv, cur_code) if _rate_ok else "N/A"
+            hold_disp = fmt_money(hold_conv, cur_code) if _rate_ok else "N/A"
+
+            await update.message.reply_text(
+                f"MAIN BALANCE= ₹{mainb:.2f} (≈ {main_disp})\n"
+                f"HOLD BALANCE= ₹{holdb:.2f} (≈ {hold_disp})",
+                reply_markup=balance_menu(user.id)
+            )
+        else:
+            await update.message.reply_text(
+                f"MAIN BALANCE= ₹{mainb:.2f}\n"
+                f"HOLD BALANCE= ₹{holdb:.2f}",
+                reply_markup=balance_menu(user.id)
+            )
+        return
+
+    if txt_is(txt, "menu_profile"):
+        mainb, holdb = get_balances(user.id)
+        total, approved, rejected, canceled = get_profile_counts(user.id)
+        total_ref, approved_any, total_bonus = _referral_stats(user.id)
+        ratio = 0.0
+
+        if (approved + rejected) > 0:
+            ratio = (approved / float(approved + rejected)) * 100.0
+
+        msg = (
+            "👤 PROFILE\n\n"
+            f"🆔 User ID: {user.id}\n"
+            f"👤 Username: {user.username or user.full_name}\n\n"
             f"MAIN BALANCE= ₹{mainb:.2f}\n"
-            f"HOLD BALANCE= ₹{holdb:.2f}",
-            reply_markup=balance_menu(user.id)
+            f"HOLD BALANCE= ₹{holdb:.2f}\n\n"
+            f"📌 TOTAL REGISTRATIONS: {total}\n"
+            f"✅ TOTAL APPROVED REGISTRATION: {approved}\n"
+            f"✖️ TOTAL REJECT REGISTERATION: {rejected}\n"
+            f"🚫 TOTAL CANCELED REGISTRATION: {canceled}\n"
+            f"📈 APPROVAL RATIO: {ratio:.1f}%\n\n"
+            f"👥 TOTAL REFERRALS: {total_ref}\n"
+            f"{tr(user.id, 'total_ref_earned', value=total_bonus)}"
         )
-    return
 
-
-if txt_is(txt, "menu_profile"):
-    mainb, holdb = get_balances(user.id)
-    total, approved, rejected, canceled = get_profile_counts(user.id)
-    total_ref, approved_any, total_bonus = _referral_stats(user.id)
-    ratio = 0.0
-    if (approved + rejected) > 0:
-        ratio = (approved / float(approved + rejected)) * 100.0
-
-    msg = (
-        "👤 PROFILE\n\n"
-        f"🆔 User ID: {user.id}\n"
-        f"👤 Username: {user.username or user.full_name}\n\n"
-        f"MAIN BALANCE= ₹{mainb:.2f}\n"
-        f"HOLD BALANCE= ₹{holdb:.2f}\n\n"
-        f"📌 TOTAL REGISTRATIONS: {total}\n"
-        f"✅ TOTAL APPROVED REGISTRATION: {approved}\n"
-        f"✖️ TOTAL REJECT REGISTERATION: {rejected}\n"
-        f"🚫 TOTAL CANCELED REGISTRATION: {canceled}\n"
-        f"📈 APPROVAL RATIO: {ratio:.1f}%\n\n"
-        f"👥 TOTAL REFERRALS: {total_ref}\n"
-        f"{tr(user.id, 'total_ref_earned', value=total_bonus)}"
-    )
-
-    await update.message.reply_text(
-        msg,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(tr(user.id, "profile_back"), callback_data="PROFILE_BACK")]]
+        await update.message.reply_text(
+            msg,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(tr(user.id, "profile_back"), callback_data="PROFILE_BACK")]]
+            )
         )
-    )
-    return
+        return
 
+    if txt_is(txt, "payout"):
+        # Payout submenu inside Balance (REPLY ONLY flow)
+        context.user_data["payout_reply_mode"] = "menu"
+        context.user_data["payout_type_select"] = True
+        context.user_data["await_upi"] = False
+        context.user_data["await_crypto_addr"] = False
+        context.user_data["await_crypto_amt"] = False
+        await update.message.reply_text(
+            tr(user.id, "choose_withdrawal"),
+            reply_markup=payout_menu_kb(user.id)
+        )
+        return
 
-if txt_is(txt, "payout"):
-    # Payout submenu inside Balance (REPLY ONLY flow)
-    context.user_data["payout_reply_mode"] = "menu"
-    context.user_data["payout_type_select"] = True
-    context.user_data["await_upi"] = False
-    context.user_data["await_crypto_addr"] = False
-    context.user_data["await_crypto_amt"] = False
-    await update.message.reply_text(
-        tr(user.id, "choose_withdrawal"),
-        reply_markup=payout_menu_kb(user.id)
-    )
-    return
-
-# Payout submenu choices (reply keyboard)
-    if context.user_data.get("payout_type_select") and context.user_data.get("payout_reply_mode") == "menu" and (txt_is(txt, "payout_upi") or txt in ("1. UPI",)):
+    # Payout submenu choices (reply keyboard)
+    if context.user_data.get("payout_type_select") and context.user_data.get("payout_reply_mode") == "menu" and (
+        txt_is(txt, "payout_upi") or txt in ("1. UPI",)
+    ):
         context.user_data["payout_reply_mode"] = "upi"
         # Same UPI amount picker, but BACK is reply-menu only (no inline back)
         await update.message.reply_text(
             tr(user.id, "choose_amount"),
             reply_markup=payout_amounts_kb()
         )
-        await update.message.reply_text(tr(user.id, "upi_mode"), reply_markup=back_only_menu(user.id))
+        await update.message.reply_text(
+            tr(user.id, "upi_mode"),
+            reply_markup=back_only_menu(user.id)
+        )
         return
 
-    if context.user_data.get("payout_type_select") and context.user_data.get("payout_reply_mode") == "menu" and (txt_is(txt, "payout_crypto") or txt.startswith("2. CRYPTO")):
+    if context.user_data.get("payout_type_select") and context.user_data.get("payout_reply_mode") == "menu" and (
+        txt_is(txt, "payout_crypto") or txt.startswith("2. CRYPTO")
+    ):
         context.user_data["payout_reply_mode"] = "crypto"
         context.user_data["await_crypto_addr"] = True
         mainb, _holdb = get_balances(user.id)
         bal_usd = inr_to_usd_fixed(float(mainb))
-        await update.message.reply_text(tr(user.id, "send_bep20"), reply_markup=back_only_menu(user.id))
+        await update.message.reply_text(
+            tr(user.id, "send_bep20"),
+            reply_markup=back_only_menu(user.id)
+        )
         return
 
-    if context.user_data.get("payout_type_select") and (txt in ("🔙 BACK", "🔙 Back", "⬅️ BACK", "⬅ BACK") or txt_is(txt, "back") or txt_is(txt, "back_upper")):
+    if context.user_data.get("payout_type_select") and (
+        txt in ("🔙 BACK", "🔙 Back", "⬅️ BACK", "⬅ BACK")
+        or txt_is(txt, "back")
+        or txt_is(txt, "back_upper")
+    ):
         mode = context.user_data.get("payout_reply_mode")
+
         if mode in ("upi", "crypto"):
             # Selected submenu BACK -> go to 3-option payout menu
             context.user_data["payout_reply_mode"] = "menu"
@@ -2926,14 +2947,18 @@ if txt_is(txt, "payout"):
             context.user_data["await_crypto_amt"] = False
             context.user_data["payout_amt"] = 0
             context.user_data["crypto_addr"] = ""
-            await update.message.reply_text(tr(user.id, "choose_withdrawal"), reply_markup=payout_menu_kb(user.id))
+            await update.message.reply_text(
+                tr(user.id, "choose_withdrawal"),
+                reply_markup=payout_menu_kb(user.id)
+            )
             return
-        # 3-option payout menu BACK -> Balance menu
+   # 3-option payout menu BACK -> Balance menu
         context.user_data.pop("payout_type_select", None)
         context.user_data.pop("payout_reply_mode", None)
         await update.message.reply_text(tr(user.id, "balance_title"), reply_markup=balance_menu(user.id))
         return
-        
+                   
+
     if txt_is(txt, "balance_history"):
         # Paginated balance history (Next/Back buttons)
         txt0, total_pages = balance_history_page_text(user.id, page=1, per_page=5)
