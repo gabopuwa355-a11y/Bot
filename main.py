@@ -2827,32 +2827,32 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if txt_is(txt, "menu_balance"):
-        mainb, holdb = get_balances(user.id)
-        cur_code = get_user_currency(user.id)
-        # exactly TWO TEXT lines requested
-        if cur_code and cur_code != "INR":
-            # If rate missing / API blocked, show N/A instead of wrong "same amount"
-            _refresh_rates_if_needed()
-            _rate_ok = bool((_rates_cache.get("rates") or {}).get(cur_code))
-            main_conv = convert_inr(mainb, cur_code)
-            hold_conv = convert_inr(holdb, cur_code)
-            main_disp = fmt_money(main_conv, cur_code) if _rate_ok else "N/A"
-            hold_disp = fmt_money(hold_conv, cur_code) if _rate_ok else "N/A"
-            await update.message.reply_text(
-                f"MAIN BALANCE= ₹{mainb:.2f} (≈ {main_disp})\n"
-                f"HOLD BALANCE= ₹{holdb:.2f} (≈ {hold_disp})",
-                reply_markup=balance_menu(user.id)
-            )
-        else:
-            await update.message.reply_text(
-                f"MAIN BALANCE= ₹{mainb:.2f}\n"
-                f"HOLD BALANCE= ₹{holdb:.2f}",
-                reply_markup=balance_menu(user.id)
-            )
-        return
+    mainb, holdb = get_balances(user.id)
+    cur_code = get_user_currency(user.id)
+    # exactly TWO TEXT lines requested
+    if cur_code and cur_code != "INR":
+        # If rate missing / API blocked, show N/A instead of wrong "same amount"
+        _refresh_rates_if_needed()
+        _rate_ok = bool((_rates_cache.get("rates") or {}).get(cur_code))
+        main_conv = convert_inr(mainb, cur_code)
+        hold_conv = convert_inr(holdb, cur_code)
+        main_disp = fmt_money(main_conv, cur_code) if _rate_ok else "N/A"
+        hold_disp = fmt_money(hold_conv, cur_code) if _rate_ok else "N/A"
+        await update.message.reply_text(
+            f"MAIN BALANCE= ₹{mainb:.2f} (≈ {main_disp})\n"
+            f"HOLD BALANCE= ₹{holdb:.2f} (≈ {hold_disp})",
+            reply_markup=balance_menu(user.id)
+        )
+    else:
+        await update.message.reply_text(
+            f"MAIN BALANCE= ₹{mainb:.2f}\n"
+            f"HOLD BALANCE= ₹{holdb:.2f}",
+            reply_markup=balance_menu(user.id)
+        )
+    return
 
 
-    if txt_is(txt, "menu_profile"):
+if txt_is(txt, "menu_profile"):
     mainb, holdb = get_balances(user.id)
     total, approved, rejected, canceled = get_profile_counts(user.id)
     total_ref, approved_any, total_bonus = _referral_stats(user.id)
@@ -2884,21 +2884,20 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 
+if txt_is(txt, "payout"):
+    # Payout submenu inside Balance (REPLY ONLY flow)
+    context.user_data["payout_reply_mode"] = "menu"
+    context.user_data["payout_type_select"] = True
+    context.user_data["await_upi"] = False
+    context.user_data["await_crypto_addr"] = False
+    context.user_data["await_crypto_amt"] = False
+    await update.message.reply_text(
+        tr(user.id, "choose_withdrawal"),
+        reply_markup=payout_menu_kb(user.id)
+    )
+    return
 
-    if txt_is(txt, "payout"):
-        # Payout submenu inside Balance (REPLY ONLY flow)
-        context.user_data["payout_reply_mode"] = "menu"
-        context.user_data["payout_type_select"] = True
-        context.user_data["await_upi"] = False
-        context.user_data["await_crypto_addr"] = False
-        context.user_data["await_crypto_amt"] = False
-        await update.message.reply_text(
-            tr(user.id, "choose_withdrawal"),
-            reply_markup=payout_menu_kb(user.id)
-        )
-        return
-
-    # Payout submenu choices (reply keyboard)
+# Payout submenu choices (reply keyboard)
     if context.user_data.get("payout_type_select") and context.user_data.get("payout_reply_mode") == "menu" and (txt_is(txt, "payout_upi") or txt in ("1. UPI",)):
         context.user_data["payout_reply_mode"] = "upi"
         # Same UPI amount picker, but BACK is reply-menu only (no inline back)
