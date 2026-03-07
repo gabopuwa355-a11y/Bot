@@ -2871,8 +2871,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🚫 TOTAL CANCELED REGISTRATION: {canceled}\n"
             f"📈 APPROVAL RATIO: {ratio:.1f}%\n\n"
             f"👥 TOTAL REFERRALS: {total_ref}\n"
-            f"{tr(user.id, "total_ref_earned", value=total_bonus)}"
-        )
+            f"{tr(user.id, 'total_ref_earned', value=total_bonus)}"
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr(user.id, "profile_back"), callback_data="PROFILE_BACK")]]))
         return
 
