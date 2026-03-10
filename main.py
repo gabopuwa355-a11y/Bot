@@ -525,7 +525,7 @@ TRANSLATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tr
 
 def _default_translations():
     return {
-       "en": {
+        "en": {
             "menu_register": "➕ Register a new account",
             "menu_accounts": "📋 My accounts",
             "menu_balance": "💰 Balance",
@@ -615,7 +615,7 @@ def _default_translations():
             "help_5_text": "Every user who joins the bot using your referral link becomes your referral.\n\nEach Gmail account registered by your referral will give you a referral reward after it is accepted.\n\nYou can have unlimited referrals.",
 
             "help_6_text": "The bot will accept any number of Gmail accounts you can register. The main condition is that Google does not block them during the 2-day hold."
-        }   
+        },   
         "hi": {
             "menu_register": "➕ नया अकाउंट रजिस्टर करें",
             "menu_accounts": "📋 मेरे अकाउंट",
