@@ -525,7 +525,7 @@ TRANSLATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tr
 
 def _default_translations():
     return {
-        "en": {
+       "en": {
             "menu_register": "➕ Register a new account",
             "menu_accounts": "📋 My accounts",
             "menu_balance": "💰 Balance",
