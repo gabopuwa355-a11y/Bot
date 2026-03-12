@@ -3696,7 +3696,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     status_text = tr(user.id, "registration_canceled")
             elif st == "shown":
                 status_text = tr(user.id, "reg_not_over")
-            elif st in ("waiting_admin", "approved"):
+            elif st in ("shown", "done1", "wating_admin", "confirmed_by_user", "timeout"):
                 try:
                     base_ts = int(rr["stime"] or 0)
                 except Exception:
@@ -3704,14 +3704,14 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if base_ts and HOLD_TO_MAIN_AFTER_DAYS:
                     until_ts = base_ts + int(HOLD_TO_MAIN_AFTER_DAYS) * 24 * 3600
                     if now_ts < until_ts:
-                        status_text = tr(user.id, "reg_not_over")
+                        status_text = tr(user.id, "🟡 In The Hold ")
                         extra = "\n" + tr(user.id, "until_hold", time=fmt_ts(until_ts))
                     else:
                         status_text = tr(user.id, "accepted")
                 else:
                     status_text = tr(user.id, "accepted")
             else:
-                status_text = tr(user.id, "reg_not_over")
+                status_text = tr(user.id, "🟡 In The Hold ")
 
             line = f"{rr['email']}\n{status_text}{extra}\nCreated: {fmt_ts(rr['stime'])}"
             lines.append(line)
