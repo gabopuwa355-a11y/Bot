@@ -3572,7 +3572,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         choice = data.split(":", 1)[1].strip()
 
-        def _day_bounds(dt: datetime.datetime):
+        def _day_bounds(dt: datetime):
             start = datetime(dt.year, dt.month, dt.day)
             end = start + timedelta(days=1)
             return int(start.timestamp()), int(end.timestamp())
