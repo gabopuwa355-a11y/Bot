@@ -57,7 +57,7 @@ def inr_to_usd_fixed(inr_amount: float) -> float:
     except Exception:
         return 0.0
 
-MANUAL_EMAIL_REASONS = ["Hello", "Ok", "Why", "Bonus", "gjkdk"]
+MANUAL_EMAIL_REASONS = ["Wrong password", "not logout account from your device", "block by Google", "not logging", "unknown error"]
 
 
 # Optional DNS lookup (for email domain MX checks)
@@ -239,6 +239,7 @@ def init_db():
         last_name TEXT,
         email TEXT UNIQUE,
         password TEXT,
+        recovery_email TEXT,
         created_at INTEGER,
         state TEXT DEFAULT 'created'   -- created, confirmed_by_user, approved, rejected, canceled, timeout
     )
@@ -334,6 +335,7 @@ def init_db():
         first_name TEXT,
         email TEXT,
         password TEXT,
+        recovery_email,
         created_at INTEGER
     )
     """)
@@ -2375,7 +2377,7 @@ def _fetch_form_rows(limit: int = 50):
     con = db()
     cur = con.cursor()
     cur.execute(
-        "SELECT user_id, first_name, email, password, created_at "
+        "SELECT user_id, first_name, email, recovery_email, password, created_at "
         "FROM form_table ORDER BY id DESC LIMIT ?",
         (limit,),
     )
@@ -2388,7 +2390,7 @@ def _fetch_form_rows_range(start_ts: int | None = None, end_ts: int | None = Non
     """Fetch rows from form_table optionally filtered by created_at [start_ts, end_ts)."""
     con = db()
     cur = con.cursor()
-    q = "SELECT user_id, first_name, email, password, created_at FROM form_table"
+    q = "SELECT user_id, first_name, email, recovery_email, password, created_at FROM form_table"
     params = []
     where = []
     if start_ts is not None:
@@ -2422,14 +2424,14 @@ def export_form_pdf(out_path: str = "form_data.pdf", limit: int = 50, *, rows=No
         _lim = limit if limit is not None else None
         rows = _fetch_form_rows_range(start_ts=start_ts, end_ts=end_ts, limit=_lim)
     
-    headers = ["USERID", "FIRSTNAME", "EMAIL", "PASSWORD", "TIME"]
+    headers = ["USERID", "FIRSTNAME", "EMAIL", "PASSWORD", "RECOVERY_EMAIL", "TIME"]
 
     # Build fixed-width table lines (monospace)
     def trunc(s, n):
         s = str(s)
         return s if len(s) <= n else s[:n-1] + "…"
 
-    colw = [10, 12, 24, 20, 16]  # character widths
+    colw = [12, 16, 28, 22, 28, 16]  # character widths
     def fmt_row(cols):
         parts = []
         for val, w in zip(cols, colw):
@@ -2448,6 +2450,7 @@ def export_form_pdf(out_path: str = "form_data.pdf", limit: int = 50, *, rows=No
             str(r["first_name"]),
             str(r["email"]),
             str(r["password"]),
+            str(r["recovery_email"]),
             t
         ]))
 
@@ -3281,6 +3284,17 @@ def strong_password(length=None):
 
     return "".join(pwd)
     
+def randomrecovery_email():
+    def part(min_len, max_len):
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        return "".join(random.choice(letters) for _ in range(random.randint(min_len, max_len)))
+
+    first_part = part(4, 7)
+    last_part  = part(4, 7)
+    number = random.randint(100, 999)
+    return f"{first_part}{last_part}{number}@xyzbaazar.com"
+    
+    
 # =========================
 # REGISTER (THIS MUST BE ASYNC)
 # =========================
@@ -3292,6 +3306,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "name": random_name(),
         "email": random_email(),
         "password": strong_password(),
+        "recovery_email": randomrecovery_email(),
     }
     temp_data[user.id] = data
 
@@ -3302,13 +3317,14 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cur.execute("""
     INSERT INTO registrations(
-        user_id, first_name, email, password, created_at, state
-    ) VALUES(?,?,?,?,?,?)
+        user_id, first_name, email, password, recovery_email, created_at, state
+    ) VALUES(?,?,?,?,?,?,?)
     """, (
         user.id,
         data["name"],
         data["email"],
         data["password"],
+        data["recovery_email"],
         now,
         "created",
     ))
@@ -3935,7 +3951,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
            
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
-
+            recovery_email = _safe_code(r["recovery_email"] if r else "")
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
@@ -3948,15 +3964,12 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Age choose : 1990-2007\n"
                 "=========================\n"
                 "Gender : Your choice,\n"
-            )
-
-            # Append Recovery email note (email monospace for easy copy)
-            recovery_email = "gabopuwa355@gmail.com"
+               )
             base_text += (
-            "\n________________________\n"
-            "🚦 You need to add Recovery email\n"
-            f"`{recovery_email}`\n"
-            )
+                "\n________________________\n"
+                "🚦 You need to add Recovery email\n"
+                f"`{recovery_email}`\n"
+               )
 
             try:
                 await q.edit_message_text(
@@ -4143,7 +4156,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
            
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
-
+            recovery_email = _safe_code(r["recovery_email"] if r else "")
             # ✅ Save to form_table ONLY after CONFIRM AGAIN + RIGHT result
             try:
                 save_form_row(
@@ -4152,13 +4165,14 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     name,
                     email,
                     password,
+                    recovery_email,
                     int(r["created_at"] or int(time.time())) if r else int(time.time()),
                 )
             except Exception:
                 pass
 
             # Append Recovery email note
-            recovery_email = "gabopuwa355@gmail.com"
+            
             base_text = tr(
                 user.id,
                 "register_template",
