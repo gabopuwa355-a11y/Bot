@@ -1,2 +1,8 @@
 [phases.setup]
-nixPkgs = ["postgresql"]
+nixPkgs = ["python311", "postgresql"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "python run.py"
