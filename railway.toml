@@ -1,0 +1,14 @@
+[build]
+builder = "nixpacks"
+
+[[services]]
+name = "main-bot"
+startCommand = "python main_bot.py"
+
+[[services]]
+name = "userbot"
+startCommand = "python userbot.py"
+
+[[services]]
+name = "admin-bot"
+startCommand = "python admin_bot.py"
