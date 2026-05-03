@@ -669,7 +669,18 @@ async def main():
     asyncio.ensure_future(_health_server())
 
     log.info("[admin_bot] Starting polling...")
-    await app.run_polling(drop_pending_updates=True)
+
+    # run_polling() internally calls asyncio.run() which conflicts when
+    # an event loop is already running (e.g. inside run.py subprocess).
+    # Use manual initialize/start/stop instead.
+    async with app:
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        log.info("[admin_bot] Polling started ✓")
+        await asyncio.Event().wait()  # run forever
+        await app.updater.stop()
+        await app.stop()
 
 
 if __name__ == "__main__":
