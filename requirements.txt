@@ -7,3 +7,8 @@ google-auth-httplib2
 reportlab
 requests
 python-dotenv==1.0.1
+flask
+telethon
+asyncio
+asyncpg==0.29.0
+aiohttp>=3.9.0
