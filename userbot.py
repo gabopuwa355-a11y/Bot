@@ -318,7 +318,7 @@ async def _do_fetch(client: TelegramClient, client_idx: int, user_id: int):
                 text_lower = (msg.text or "").lower()
 
                 # Terminal — recovery email step, save karo
-                if "recovery email" in text_lower or "add recovery" in text_lower:
+                if "you need to add recovery email" in text:
                     data = parse_task(msg.text)
                     if data["email"]:
                         await save_registration(
