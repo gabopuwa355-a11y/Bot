@@ -3213,77 +3213,130 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================ GENERATORS ===============
-
-# ----------------------------
-# NEW HUMAN-LIKE NAME GENERATOR
-# ----------------------------
 import random
-import time
 
-VOWELS = "AEIOU"
-CONSONANTS = "BCDFGHJKLMNPQRSTVWXYZ"
+# ----------------------------
+# NAME GENERATION
+# ----------------------------
 
-def random_name():
+VOWELS = "aeiou"
+CONSONANTS = "bcdfghjklmnpqrstvwxyz"
+
+def random_first_name():
     length = random.choice([4, 5, 6, 7])
     name = ""
     for i in range(length):
-        name += random.choice(CONSONANTS if i % 2 == 0 else VOWELS)
+        if i % 2 == 0:
+            name += random.choice(CONSONANTS)
+        else:
+            name += random.choice(VOWELS)
+    return name.capitalize()
+
+def random_last_name():
+    length = random.choice([4, 5, 6, 7])
+    name = ""
+    for i in range(length):
+        if i % 2 == 0:
+            name += random.choice(CONSONANTS)
+        else:
+            name += random.choice(VOWELS)
     return name.capitalize()
 
 # ----------------------------
-# REALISTIC EMAIL GENERATOR
-# (not based on first name)
+# EMAIL - only letters + numbers
 # ----------------------------
-def random_email():
-    def part(min_len, max_len):
-        letters = "abcdefghijklmnopqrstuvwxyz"
-        return "".join(random.choice(letters) for _ in range(random.randint(min_len, max_len)))
 
-    first_part = part(4, 7)
-    last_part  = part(4, 7)
-    number = random.randint(100, 999)
-    return f"{first_part}{last_part}{number}@gmail.com"
+def random_email(first_name, last_name):
+    fn = first_name.lower()
+    ln = last_name.lower()
+
+    letters = "abcdefghijklmnopqrstuvwxyz"
+
+    def rand_word(min_l, max_l):
+        return "".join(random.choice(letters) for _ in range(random.randint(min_l, max_l)))
+
+    def rand_num(a, b):
+        return str(random.randint(a, b))
+
+    fn_char  = random.choice(fn)
+    ln_char  = random.choice(ln)
+    fn_2char = fn[:2]
+    ln_2char = ln[:2]
+
+    styles = [
+        f"{rand_word(3,5)}{fn_char}{rand_word(2,4)}{rand_num(10,999)}",
+        f"{rand_word(4,6)}{ln_char}{rand_word(2,4)}{rand_num(10,99)}",
+        f"{fn_char}{rand_word(4,7)}{rand_num(100,9999)}",
+        f"{ln_char}{rand_word(4,6)}{rand_num(10,999)}",
+        f"{fn_2char}{rand_word(4,6)}{rand_num(10,999)}",
+        f"{ln_2char}{rand_word(3,6)}{rand_num(10,99)}",
+        f"{rand_word(3,5)}{fn_2char}{rand_num(100,9999)}",
+        f"{rand_word(3,5)}{ln_2char}{rand_word(2,4)}{rand_num(10,99)}",
+        f"{fn_char}{rand_word(2,4)}{ln_char}{rand_word(2,4)}{rand_num(10,99)}",
+        f"{fn_2char}{ln_2char}{rand_word(3,5)}{rand_num(10,999)}",
+        f"{rand_word(2,4)}{fn_char}{ln_char}{rand_word(2,4)}{rand_num(10,99)}",
+        f"{rand_word(5,9)}{rand_num(10,9999)}",
+        f"{rand_word(6,10)}{rand_num(100,999)}",
+        f"{rand_word(4,8)}{rand_num(10,99)}",
+        f"{rand_word(7,11)}{rand_num(1,99)}",
+    ]
+
+    return f"{random.choice(styles)}@gmail.com"
 
 # ----------------------------
 # STRONG PASSWORD (no 0, no l)
+# Length: 8 to 15
 # ----------------------------
 
-def strong_password(length=None):
-    if length is None:
-        length = random.choice([9,10,11,12,13,14,15])
+def strong_password():
+    length = random.choice([8, 9, 10, 11, 12, 13, 14, 15])
 
     uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-    lowercase = "abcdefghijkmnopqrstuvwxyz"
-    numbers   = "123456789"
-    symbols   = "!@#$&"
+    lowercase  = "abcdefghijkmnopqrstuvwxyz"
+    numbers    = "123456789"
+    symbols    = "!@#$&*-_"
 
     all_chars = uppercase + lowercase + numbers + symbols
 
     pwd = [
         random.choice(uppercase),
+        random.choice(uppercase),
         random.choice(lowercase),
+        random.choice(lowercase),
+        random.choice(numbers),
         random.choice(numbers),
         random.choice(symbols),
     ]
 
-    pwd += random.choices(all_chars, k=length - 4)
+    pwd += random.choices(all_chars, k=length - len(pwd))
     random.shuffle(pwd)
-
     return "".join(pwd)
-    
-def randomrecovery_email():
-    def part(min_len, max_len):
-        letters = "abcdefghijklmnopqrstuvwxyz"
-        return "".join(random.choice(letters) for _ in range(random.randint(min_len, max_len)))
 
-    first_part = part(4, 7)
-    last_part  = part(4, 7)
-    number = random.randint(100, 999)
-    return f"{first_part}{last_part}{number}@xyzbaazar.com"
-    
-    
-    
-    
+# ----------------------------
+# RECOVERY EMAIL - only letters + numbers
+# ----------------------------
+
+def random_recovery_email():
+    letters = "abcdefghijklmnopqrstuvwxyz"
+
+    def part(min_l, max_l):
+        return "".join(random.choice(letters) for _ in range(random.randint(min_l, max_l)))
+
+    def rand_num(a, b):
+        return str(random.randint(a, b))
+
+    styles = [
+        f"{part(4,7)}{part(3,6)}{rand_num(10,999)}",
+        f"{part(4,8)}{rand_num(10,99)}",
+        f"{part(5,8)}{rand_num(100,9999)}",
+        f"{part(6,10)}{rand_num(10,999)}",
+        f"{part(4,6)}{part(3,5)}{rand_num(1,99)}",
+        f"{part(7,11)}{rand_num(10,99)}",
+        f"{part(5,9)}{rand_num(10,99)}",
+    ]
+
+    return f"{random.choice(styles)}@xyzbaazar.com"
+
 # =========================
 # REGISTER (THIS MUST BE ASYNC)
 # =========================
@@ -3293,9 +3346,10 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Generate preview data
     data = {
         "name": random_name(),
+        "last_name": random_last_name(),
         "email": random_email(),
         "password": strong_password(),
-        "recovery_email": randomrecovery_email(),
+        "recovery_email": random_recovery_email(),
     }
     temp_data[user.id] = data
 
@@ -3961,7 +4015,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{first_name}`\n"
-                f"Last Name: `{✖️}`\n"
+                f"Last Name: `{✖️✖️}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
