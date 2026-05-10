@@ -3343,14 +3343,19 @@ def random_recovery_email():
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
+    # Generate names first
+    first_name = random_first_name()
+    last_name = random_last_name()
+
     # Generate preview data
     data = {
-        "first_name": random_first_name(),
-        "last_name": random_last_name(),
+        "first_name": first_name,
+        "last_name": last_name,
         "email": random_email(first_name, last_name),
         "password": strong_password(),
         "recovery_email": random_recovery_email(),
     }
+
     temp_data[user.id] = data
 
     # Create DB rows (registration + action) so callbacks can work
