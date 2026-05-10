@@ -3498,12 +3498,26 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     user = update.effective_user
-    if user.id != ADMIN_ID and is_blocked(user.id):
-        return
 
-    ensure_user(user.id, user.username or user.full_name)
-    moved = move_matured_hold_to_main(user.id)
+    try:
+        if user.id != ADMIN_ID and is_blocked(user.id):
+            return
+    except Exception as e:
+        print(f"[CB ERROR] is_blocked crashed: {e}", flush=True)
+
+    try:
+        ensure_user(user.id, user.username or user.full_name)
+    except Exception as e:
+        print(f"[CB ERROR] ensure_user crashed: {e}", flush=True)
+
+    try:
+        moved = move_matured_hold_to_main(user.id)
+    except Exception as e:
+        print(f"[CB ERROR] move_matured_hold crashed: {e}", flush=True)
+        moved = 0
+
     data = q.data or ""
+    print(f"[CB] user={user.id} data={data}", flush=True)
 
     # ── Maintenance toggle ───────────────────────────────────────────
     if data == "MAINT_TOGGLE":
