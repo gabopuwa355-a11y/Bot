@@ -4352,10 +4352,8 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as _save_err:
                 print(f"[save_form_row ERROR] {_save_err!r}")
-t
-            base_text = (
-                "
-            # Append Recovery email note
+
+            
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
