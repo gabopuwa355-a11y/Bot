@@ -85,7 +85,7 @@ FINGERPRINT_PUBLIC_BASE_URL = ""  # device-verify webapp disabled; keep empty to
 # GMAIL SMTP + IMAP (Deliverability check via real send + bounce)
 # NOTE: This does NOT "probe" SMTP for existence; it sends a tiny test email and checks for bounce.
 # You must use a Gmail account with 2FA + App Password, and enable IMAP in Gmail settings.
-ENABLE_SMTP_BOUNCE_CHECK = True
+ENABLE_SMTP_BOUNCE_CHECK = false
 SMTP_GMAIL_USER = "aadiltyagi459@gmail.com"
 SMTP_GMAIL_APP_PASSWORD = "kawl rdaz jawr nhfp"
 BOUNCE_POLL_SECONDS = 4  # max wait time (fast mode)
@@ -3360,11 +3360,12 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cur.execute("""
     INSERT INTO registrations(
-        user_id, first_name, email, password, recovery_email, created_at, state
-    ) VALUES(?,?,?,?,?,?,?)
+        user_id, first_name, last_name, email, password, recovery_email, created_at, state
+    ) VALUES(?,?,?,?,?,?,?,?)
     """, (
         user.id,
         data["name"],
+        data["last_name"],
         data["email"],
         data["password"],
         data["recovery_email"],
@@ -3393,14 +3394,15 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Register account using the specified\n"
         "data and get from ₹20 to ₹22\n\n"
-        f"Name: `{data['name']}`\n\n"
-        f"Email: `{data['email']}`\n\n"
-        f"Password: `{data['password']}`\n\n"
+        f"Name: `{data['name']}`\n"
+        f"Last Name: `{data['last_name']}`\n"
+        f"Email: `{data['email']}`\n"
+        f"Password: `{data['password']}`\n"
         "🔐 Be sure to use the specified data,\n"
         "otherwise the account will not be paid,\n\n"
         " =========================\n"
         "Age choose : 1990-2007\n"
-         "========================\n\n"
+         "========================\n"
         "Gender : Your choice,\n",
         parse_mode="Markdown",
         reply_markup=reg_buttons(action_id),
@@ -3953,7 +3955,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{first_name}`\n"
-                f"Last Name: `{✖️}`\n"
+                f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4015,7 +4017,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{first_name}`\n"
-                f"Last Name: `{✖️✖️}`\n"
+                f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4059,7 +4061,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{first_name}`\n"
-                f"Last Name: `{✖️}`\n"
+                f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4104,7 +4106,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{name}`\n"
-                f"Last Name: `{✖️}`\n"
+                f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4146,7 +4148,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{first_name}`\n"
-                f"Last Name: `{✖️}`\n"
+                f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4341,7 +4343,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 save_form_row(
                     int(a["reg_id"]),
                     int(user.id),
-                    name,
+                    first_name,
                     email,
                     password,
                     recovery_email,
@@ -4356,7 +4358,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{first_name}`\n"
-                f"Last Name: `{✖️}`\n"
+                f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
