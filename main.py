@@ -3891,7 +3891,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             first_name = _safe_code(r["first_name"] if r else "")
             last_name  = _safe_code(r["last_name"] if r else "")
-            name = (first_name + " " + last_name).strip()
            
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
@@ -3899,9 +3898,10 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{name}`\n\n"
-                f"Email: `{email}`\n\n"
-                f"Password: `{password}`\n\n"
+                f"Name: `{first_name}`\n"
+                f"Last Name: `{✖️}`\n"
+                f"Email: `{email}`\n"
+                f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
                 "otherwise the account will not be paid\n"
                 "=========================\n"
@@ -3954,16 +3954,16 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             first_name = _safe_code(r["first_name"] if r else "")
             last_name  = _safe_code(r["last_name"] if r else "")
-            name = (first_name + " " + last_name).strip()
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
 
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{name}`\n\n"
-                f"Email: `{email}`\n\n"
-                f"Password: `{password}`\n\n"
+                f"Name: `{first_name}`\n"
+                f"Last Name: `{✖️}`\n"
+                f"Email: `{email}`\n"
+                f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
                 "otherwise the account will not be paid\n"
                 "=========================\n"
@@ -3996,8 +3996,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return s.replace("`", "'")
 
             first_name = _safe_code(r["first_name"] if r else "")
-            last_name  = _safe_code(r["last_name"] if r else "")
-            name = (first_name + " " + last_name).strip()
+            last_name  = _safe_code(r["last_name"] if r else "")   
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
             recovery_email = _safe_code(r["recovery_email"] if r else "")
@@ -4005,7 +4004,8 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{name}`\n"
+                f"Name: `{first_name}`\n"
+                f"Last Name: `{✖️}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4043,14 +4043,14 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             first_name = _safe_code(r["first_name"] if r else "")
             last_name  = _safe_code(r["last_name"] if r else "")
-            name = (first_name + " " + last_name).strip()
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
 
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{name}`\n\n"
+                f"Name: `{name}`\n"
+                f"Last Name: `{✖️}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4085,14 +4085,14 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             first_name = _safe_code(r["first_name"] if r else "")
             last_name  = _safe_code(r["last_name"] if r else "")
-            name = (first_name + " " + last_name).strip()
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
 
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{name}`\n"
+                f"Name: `{first_name}`\n"
+                f"Last Name: `{✖️}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n"
                 "🔐 Be sure to use the specified data,\n"
@@ -4278,7 +4278,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             first_name = _safe_code(r["first_name"] if r else "")
             last_name  = _safe_code(r["last_name"] if r else "")
-            name = (first_name + " " + last_name).strip()
            
             email = _safe_code(r["email"] if r else "")
             password = _safe_code(r["password"] if r else "")
@@ -4299,14 +4298,24 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Append Recovery email note
             
-            base_text = tr(
-                user.id,
-                "register_template",
-                name=name,
-                email=email,
-                password=password,
-                recovery_email=recovery_email,
+             base_text = (
+                "Register account using the specified\n"
+                "data and get from ₹20 to ₹22\n\n"
+                f"Name: `{first_name}`\n"
+                f"Last Name: `{✖️}`\n"
+                f"Email: `{email}`\n"
+                f"Password: `{password}`\n"
+                "🔐 Be sure to use the specified data,\n"
+                "otherwise the account will not be paid\n"
+                "=========================\n"
+                "Age choose : 1990-2007\n"
+                "=========================\n"
+                "Gender : Your choice\n"
+                "________________________\n"
+                "🚦 You need to add Recovery email :\n"
+                f"`{recovery_email}`\n"
             )
+            
 
             kb = InlineKeyboardMarkup([[
                 InlineKeyboardButton("📲 How to logout of account ?", callback_data="VID_LOGOUT")
