@@ -85,7 +85,7 @@ FINGERPRINT_PUBLIC_BASE_URL = ""  # device-verify webapp disabled; keep empty to
 # GMAIL SMTP + IMAP (Deliverability check via real send + bounce)
 # NOTE: This does NOT "probe" SMTP for existence; it sends a tiny test email and checks for bounce.
 # You must use a Gmail account with 2FA + App Password, and enable IMAP in Gmail settings.
-ENABLE_SMTP_BOUNCE_CHECK = false
+ENABLE_SMTP_BOUNCE_CHECK = False
 SMTP_GMAIL_USER = "aadiltyagi459@gmail.com"
 SMTP_GMAIL_APP_PASSWORD = "kawl rdaz jawr nhfp"
 BOUNCE_POLL_SECONDS = 4  # max wait time (fast mode)
