@@ -3345,7 +3345,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Generate preview data
     data = {
-        "name": random_name(),
+        "first_name": random_first_name(),
         "last_name": random_last_name(),
         "email": random_email(),
         "password": strong_password(),
@@ -3364,7 +3364,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ) VALUES(?,?,?,?,?,?,?,?)
     """, (
         user.id,
-        data["name"],
+        data["first_name"],
         data["last_name"],
         data["email"],
         data["password"],
@@ -3394,7 +3394,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Register account using the specified\n"
         "data and get from ₹20 to ₹22\n\n"
-        f"Name: `{data['name']}`\n"
+        f"Name: `{data['first_name']}`\n"
         f"Last Name: `{data['last_name']}`\n"
         f"Email: `{data['email']}`\n"
         f"Password: `{data['password']}`\n"
