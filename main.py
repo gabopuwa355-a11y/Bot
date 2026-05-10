@@ -3294,7 +3294,7 @@ def strong_password():
     uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ"
     lowercase  = "abcdefghijkmnopqrstuvwxyz"
     numbers    = "123456789"
-    symbols    = "!@#$&*-_"
+    symbols    = "!@#$&₹?"
 
     all_chars = uppercase + lowercase + numbers + symbols
 
@@ -3347,7 +3347,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = {
         "first_name": random_first_name(),
         "last_name": random_last_name(),
-        "email": random_email(),
+        "email": random_email(first_name, last_name),
         "password": strong_password(),
         "recovery_email": random_recovery_email(),
     }
