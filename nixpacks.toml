@@ -5,4 +5,4 @@ nixPkgs = ["python311", "postgresql"]
 cmds = ["pip install -r requirements.txt"]
 
 [start]
-cmd = "python run.py"
+cmd = "python main.py"
