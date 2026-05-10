@@ -4057,6 +4057,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             password = _safe_code(r["password"] if r else "")
             recovery_email = _safe_code(r["recovery_email"] if r else "")
 
+
             base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
@@ -4351,10 +4352,11 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as _save_err:
                 print(f"[save_form_row ERROR] {_save_err!r}")
-
+t
+            base_text = (
+                "
             # Append Recovery email note
-            
-             base_text = (
+            base_text = (
                 "Register account using the specified\n"
                 "data and get from ₹20 to ₹22\n\n"
                 f"Name: `{first_name}`\n"
@@ -4369,8 +4371,8 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Gender : Your choice\n"
                 "________________________\n"
                 "🚦 You need to add Recovery email :\n"
-                f"`{recovery_email}`\n"
-            )
+                f"`{recovery_email}`\n"                
+            ) 
             
 
             kb = InlineKeyboardMarkup([[
