@@ -87,7 +87,15 @@ def _pg_connect():
 
 def db():
     """Drop-in for the SQLite db() function. Returns a PgConnectionWrapper."""
-    if not getattr(_local, "conn", None) or _local.conn.closed:
+    conn = getattr(_local, "conn", None)
+    if conn is None or conn.closed:
+        _local.conn = _pg_connect()
+        return _local.conn
+    # Check if connection is in broken/aborted state and reset it
+    try:
+        if conn._raw.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
+            conn._raw.rollback()
+    except Exception:
         _local.conn = _pg_connect()
     return _local.conn
 
@@ -175,6 +183,7 @@ def _translate_insert_or_replace(sql: str) -> str:
         "form_table": "reg_id",
         "precredits": "action_id",
         "referral_bonuses": "(referrer_id, referred_user_id)",
+        "admin_settings": "key",
     }
 
     s = re.sub(r"INSERT\s+OR\s+REPLACE\b", "INSERT", sql, flags=re.IGNORECASE)
@@ -264,6 +273,17 @@ class PgCursorWrapper:
         except psycopg2.errors.UniqueViolation:
             self._conn._raw.rollback()
             return
+        except psycopg2.errors.UndefinedTable:
+            # Table doesn't exist yet — rollback and skip silently
+            self._conn._raw.rollback()
+            return
+        except psycopg2.Error as e:
+            # Any other psycopg2 error — rollback to keep connection usable
+            try:
+                self._conn._raw.rollback()
+            except Exception:
+                pass
+            raise
 
         # Capture lastrowid from RETURNING id
         if needs_returning:
@@ -408,9 +428,16 @@ def init_db():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS blocked_users(
         user_id BIGINT PRIMARY KEY,
-        blocked_at BIGINT
+        blocked_at BIGINT,
+        reason TEXT DEFAULT ''
     )
     """)
+    # Migration: add reason column if older DB doesn't have it
+    try:
+        cur.execute("ALTER TABLE blocked_users ADD COLUMN reason TEXT DEFAULT ''")
+        con.commit()
+    except Exception:
+        con.rollback()
 
     # ── pending_referrals ────────────────────────────────────────────────────
     cur.execute("""
@@ -662,6 +689,15 @@ def init_db():
         created_at BIGINT NOT NULL,
         updated_at BIGINT,
         error TEXT DEFAULT ''
+    )
+    """)
+
+    # ── admin_settings ───────────────────────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS admin_settings(
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at BIGINT
     )
     """)
 
