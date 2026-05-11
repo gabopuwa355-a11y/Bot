@@ -2981,9 +2981,15 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # continue normal handling too (if it's a menu tap, it will match)
 
     # MAIN MENU routes
-    if txt_is(txt, "menu_register"):
-        if not can_do_action(user.id):
-            await update.messageif txt_is(txt, "menu_accounts"):
+    
+        # Begin legit input flow
+        context.user_data["reg_flow"] = {"step": 1, "first_name": "", "email": "", "password": ""}
+        await update.message.reply_text(
+            "Register account using the specified data and get from ₹08 to ₹10\n\n"
+            "Please enter FIRST NAME (A-Z, 5/6/7 characters):"
+        )
+        return
+    if txt_is(txt, "menu_accounts"):
         con = db()
         cur = con.cursor()
 
@@ -3031,18 +3037,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(msg) > 4000:
             msg = msg[:4000] + "\n..."
         await update.message.reply_text(msg, reply_markup=accounts_nav(0, total))
-        return.reply_text(tr(user.id, "action_too_often"))
-            return
-
-        await register(update, context)
-        return
-
-        # Begin legit input flow
-        context.user_data["reg_flow"] = {"step": 1, "first_name": "", "email": "", "password": ""}
-        await update.message.reply_text(
-            "Register account using the specified data and get from ₹08 to ₹10\n\n"
-            "Please enter FIRST NAME (A-Z, 5/6/7 characters):"
-        )
         return
 
     
