@@ -97,14 +97,26 @@ def db():
     # Check if underlying psycopg2 connection is alive and clean
     try:
         raw = conn._raw
-        status = raw.status
 
-        # Aborted transaction (e.g. after an exception mid-query) — must rollback
-        if status == psycopg2.extensions.STATUS_IN_TRANSACTION:
-            raw.rollback()
-
-        # Connection is broken/closed at socket level — make a fresh one
+        # Connection broken at socket level — make a fresh one
         if raw.closed:
+            _local.conn = _pg_connect()
+            return _local.conn
+
+        # get_transaction_status() is the reliable way to detect aborted txn:
+        #   TRANSACTION_STATUS_IDLE    = 0  clean, no open txn
+        #   TRANSACTION_STATUS_INTRANS = 1  normal open txn (not yet committed) — DO NOT rollback
+        #   TRANSACTION_STATUS_INERROR = 3  error inside txn — MUST rollback before reuse
+        #   TRANSACTION_STATUS_UNKNOWN = 4  connection dead
+        txn_status = raw.get_transaction_status()
+        if txn_status == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
+            raw.rollback()
+        elif txn_status == psycopg2.extensions.TRANSACTION_STATUS_UNKNOWN:
+            # Dead connection — replace
+            try:
+                raw.close()
+            except Exception:
+                pass
             _local.conn = _pg_connect()
             return _local.conn
 
