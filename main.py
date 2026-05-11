@@ -864,30 +864,33 @@ def _build_account_lines(rows, user_id: int, now_ts: int) -> list:
     """Build formatted lines for account history rows."""
     lines = []
     for i, rr in enumerate(rows, 1):
-        st           = (rr["astate"] or "").strip()
-        rstate       = (rr["rstate"] if "rstate" in rr.keys() else "") or ""
-        ev_status    = (rr["ev_status"] or "").strip()
-        ev_reason    = (rr["ev_reason"] or "").strip()
-        ev_norm      = ev_status.upper().replace(" ", "_")
         try:
-            stime = int(rr["stime"] or 0)
-        except Exception:
-            stime = 0
+            st        = (rr["astate"] or "").strip()
+            rstate    = (rr["rstate"] if "rstate" in rr.keys() else "") or ""
+            ev_status = (rr["ev_status"] or "").strip()
+            ev_reason = (rr["ev_reason"] or "").strip()
+            ev_norm   = ev_status.upper().replace(" ", "_")
+            try:
+                stime = int(rr["stime"] or 0)
+            except Exception:
+                stime = 0
 
-        status_text, extra = _account_status_text(
-            user_id, st, rstate, ev_norm, ev_reason, stime, now_ts
-        )
+            status_text, extra = _account_status_text(
+                user_id, st, rstate, ev_norm, ev_reason, stime, now_ts
+            )
 
-        email_display = rr["email"] or "—"
-        time_display  = fmt_ts(stime) if stime else "—"
+            email_display = rr["email"] or "—"
+            time_display  = fmt_ts(stime) if stime else "—"
 
-        line = (
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📧 {email_display}\n"
-            f"📌 {status_text}{extra}\n"
-            f"🕐 {time_display}"
-        )
-        lines.append(line)
+            line = (
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📧 {email_display}\n"
+                f"📌 {status_text}{extra}\n"
+                f"🕐 {time_display}"
+            )
+            lines.append(line)
+        except Exception as e:
+            lines.append(f"━━━━━━━━━━━━━━━━━━\n⚠️ Error loading entry {i}: {e}")
     return lines
 
 
@@ -3040,7 +3043,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = _build_account_lines(rows, user.id, now_ts)
         total_pages = max(1, (total + 4) // 5)
         header = f"📋 My Accounts — Page 1/{total_pages} ({total} total)\n"
-        msg = header + "\n".join(lines)
+        msg = header + "\n\n".join(lines)
         if len(msg) > 4000:
             msg = msg[:4000] + "\n..."
         await update.message.reply_text(msg, reply_markup=accounts_nav(0, total))
@@ -4007,7 +4010,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lines = _build_account_lines(rows, user.id, now_ts)
         header = f"📋 My Accounts — Page {page}/{total_pages} ({total} total)\n"
-        msg = header + "\n".join(lines)
+        msg = header + "\n\n".join(lines)
         if len(msg) > 4000:
             msg = msg[:4000] + "\n..."
         await q.edit_message_text(msg, reply_markup=accounts_nav(offset, total))
