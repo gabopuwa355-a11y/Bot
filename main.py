@@ -2983,23 +2983,10 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # MAIN MENU routes
     if txt_is(txt, "menu_register"):
         if not can_do_action(user.id):
-            await update.message.reply_text(tr(user.id, "action_too_often"))
-            return
-
-        await register(update, context)
-        return
-
-        # Begin legit input flow
-        context.user_data["reg_flow"] = {"step": 1, "first_name": "", "email": "", "password": ""}
-        await update.message.reply_text(
-            "Register account using the specified data and get from ₹08 to ₹10\n\n"
-            "Please enter FIRST NAME (A-Z, 5/6/7 characters):"
-        )
-        return
-
-    if txt_is(txt, "menu_accounts"):
+            await update.messageif txt_is(txt, "menu_accounts"):
         con = db()
         cur = con.cursor()
+
         cur.execute("""
             SELECT COUNT(*) AS c
             FROM actions a
@@ -3040,12 +3027,25 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = _build_account_lines(rows, user.id, now_ts)
         total_pages = max(1, (total + 4) // 5)
         header = f"📋 My Accounts — Page 1/{total_pages} ({total} total)\n"
-        msg = header + "\n\n".join(lines)
+        msg = header + "\n".join(lines)
         if len(msg) > 4000:
             msg = msg[:4000] + "\n..."
         await update.message.reply_text(msg, reply_markup=accounts_nav(0, total))
+        return.reply_text(tr(user.id, "action_too_often"))
+            return
+
+        await register(update, context)
         return
 
+        # Begin legit input flow
+        context.user_data["reg_flow"] = {"step": 1, "first_name": "", "email": "", "password": ""}
+        await update.message.reply_text(
+            "Register account using the specified data and get from ₹08 to ₹10\n\n"
+            "Please enter FIRST NAME (A-Z, 5/6/7 characters):"
+        )
+        return
+
+    
     if txt_is(txt, "menu_balance"):
         mainb, holdb = get_balances(user.id)
         cur_code = get_user_currency(user.id)
@@ -3951,19 +3951,13 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("❌ Not authorized")
             return
         offset = int(data.split(":")[1])
-        total = admin_total_users()
-        await _send_admin_users_page(q, context, offset=offset, total=total)
-        await q.answer()
-        return
-
-    # B) Accounts pagination
-    if data.startswith("ACC:"):
+        total = admin_total_uif data.startswith("ACC:"):
         offset = int(data.split(":")[1])
-
-        _ALL_STATES = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt','timeout')"
-
         con = db()
         cur = con.cursor()
+
+        _ALL_STATES = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt',timeout')"
+
         cur.execute(f"""
             SELECT COUNT(*) AS c
             FROM actions a
@@ -3971,14 +3965,13 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             WHERE a.user_id=? AND a.state IN {_ALL_STATES}
         """, (user.id,))
         total = int(cur.fetchone()["c"])
-
         if total == 0:
             con.close()
-            await q.edit_message_text(tr(user.id, "my_accounts_empty"))
+            await q.edit_message_text(tr(user.id, "accounts_history_empty"))
             return
 
-        max_offset = ((total - 1) // 5) * 5
-        offset = max(0, min(offset, max_offset))
+        # Clamp offset
+        offset = max(0, min(offset, max(0, total - 5)))
 
         cur.execute(f"""
             SELECT r.id AS reg_id,
@@ -4005,12 +3998,18 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lines = _build_account_lines(rows, user.id, now_ts)
         header = f"📋 My Accounts — Page {page}/{total_pages} ({total} total)\n"
-        msg = header + "\n\n".join(lines)
+        msg = header + "\n".join(lines)
         if len(msg) > 4000:
             msg = msg[:4000] + "\n..."
         await q.edit_message_text(msg, reply_markup=accounts_nav(offset, total))
         return
+        sers()
+        await _send_admin_users_page(q, context, offset=offset, total=total)
+        await q.answer()
+        return
 
+    # B) Accounts pagination
+    
 # B2) Payout type menu (UPI / CRYPTO)
     if data == "PAYOUT_TYPE:MENU":
         # Reset any in-progress withdraw input flow
