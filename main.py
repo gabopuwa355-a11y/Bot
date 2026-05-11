@@ -3945,7 +3945,13 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("❌ Not authorized")
             return
         offset = int(data.split(":")[1])
-        total = admin_total_uif data.startswith("ACC:"):
+        total = admin_total_users()
+        await _send_admin_users_page(q, context, offset=offset, total=total)
+        await q.answer()
+        return
+        
+    # B) Accounts pagination
+    if data.startswith("ACC:"):
         offset = int(data.split(":")[1])
         con = db()
         cur = con.cursor()
@@ -3997,12 +4003,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = msg[:4000] + "\n..."
         await q.edit_message_text(msg, reply_markup=accounts_nav(offset, total))
         return
-        sers()
-        await _send_admin_users_page(q, context, offset=offset, total=total)
-        await q.answer()
-        return
-
-    # B) Accounts pagination
+    
     
 # B2) Payout type menu (UPI / CRYPTO)
     if data == "PAYOUT_TYPE:MENU":
