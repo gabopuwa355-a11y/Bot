@@ -2921,16 +2921,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(tr(user.id, "welcome_menu"), reply_markup=main_menu_markup(user.id))
 
 
-# =========================
-# A) REGISTER (LEGIT FLOW)
-# =========================
-# Step flow:
-# Tap "Register" -> ask First Name
-# then Email -> then Password -> show final preview + DONE/CANCEL
-# DONE -> show CONFIRM AGAIN  # CONFIRM AGAIN HEAVY EFFECT
-# CONFIRM AGAIN  # CONFIRM AGAIN HEAVY EFFECT -> send to ADMIN for approve/reject (admin panel buttons)
-# Admin Approve -> add HOLD credit (example amount) + user notified
-# Admin Reject -> notify user
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -2978,17 +2968,9 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await send_configured_autoreply(update, context)
                 except Exception:
                     pass
-                # continue normal handling too (if it's a menu tap, it will match)
+                
 
-    # MAIN MENU routes
     
-        # Begin legit input flow
-        context.user_data["reg_flow"] = {"step": 1, "first_name": "", "email": "", "password": ""}
-        await update.message.reply_text(
-            "Register account using the specified data and get from ₹08 to ₹10\n\n"
-            "Please enter FIRST NAME (A-Z, 5/6/7 characters):"
-        )
-        return
     if txt_is(txt, "menu_accounts"):
         con = db()
         cur = con.cursor()
