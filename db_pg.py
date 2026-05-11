@@ -342,10 +342,13 @@ class PgCursorWrapper:
             return None
         if raw is None:
             return None
-        keys = [d[0] for d in self._cur.description] if self._cur.description else []
-        if isinstance(raw, dict):
-            return PgRow(raw, keys)
-        return raw
+        if self._cur.description:
+            keys = [d[0] for d in self._cur.description]
+        elif hasattr(raw, 'keys'):
+            keys = list(raw.keys())
+        else:
+            return raw
+        return PgRow(dict(raw), keys)
 
     def fetchall(self):
         try:
@@ -354,10 +357,13 @@ class PgCursorWrapper:
             return []
         if not rows:
             return []
-        if not self._cur.description:
+        if self._cur.description:
+            keys = [d[0] for d in self._cur.description]
+        elif hasattr(rows[0], 'keys'):
+            keys = list(rows[0].keys())
+        else:
             return rows
-        keys = [d[0] for d in self._cur.description]
-        return [PgRow(r, keys) for r in rows]
+        return [PgRow(dict(r), keys) for r in rows]
 
     def __iter__(self):
         for row in self.fetchall():
