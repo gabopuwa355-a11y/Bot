@@ -3001,8 +3001,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if txt_is(txt, "menu_accounts"):
-        con = db()
-        cur1 = con.cursor()
+        con1 = db()
+        cur1 = con1.cursor()
         cur1.execute("""
             SELECT COUNT(*) AS c
             FROM actions a
@@ -3012,13 +3012,14 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         """, (user.id,))
         total = int(cur1.fetchone()["c"])
+        con1.close()
 
         if total == 0:
-            con.close()
             await update.message.reply_text(tr(user.id, "my_accounts_empty"))
             return
 
-        cur2 = con.cursor()
+        con2 = db()
+        cur2 = con2.cursor()
         cur2.execute("""
             SELECT r.id AS reg_id,
                    r.email AS email,
@@ -3038,15 +3039,13 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             LIMIT 5 OFFSET 0
         """, (user.id,))
         rows = cur2.fetchall()
-        con.close()
+        con2.close()
 
         now_ts = int(time.time())
         lines = _build_account_lines(rows, user.id, now_ts)
-        print(f"[ACCT DEBUG] rows={len(rows)} lines={len(lines)} lines_content={lines}", flush=True)
         total_pages = max(1, (total + 4) // 5)
         header = f"📋 My Accounts — Page 1/{total_pages} ({total} total)\n"
         msg = header + "\n\n".join(lines)
-        print(f"[ACCT DEBUG] msg_len={len(msg)} msg={repr(msg[:300])}", flush=True)
         if len(msg) > 4000:
             msg = msg[:4000] + "\n..."
         await update.message.reply_text(msg, reply_markup=accounts_nav(0, total))
@@ -3965,11 +3964,11 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # B) Accounts pagination
     if data.startswith("ACC:"):
         offset = int(data.split(":")[1])
-        con = db()
 
         _ALL_STATES = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt','timeout')"
 
-        cur1 = con.cursor()
+        con1 = db()
+        cur1 = con1.cursor()
         cur1.execute(f"""
             SELECT COUNT(*) AS c
             FROM actions a
@@ -3977,17 +3976,17 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             WHERE a.user_id=? AND a.state IN {_ALL_STATES}
         """, (user.id,))
         total = int(cur1.fetchone()["c"])
+        con1.close()
 
         if total == 0:
-            con.close()
             await q.edit_message_text(tr(user.id, "my_accounts_empty"))
             return
 
-        # Clamp offset correctly
         max_offset = ((total - 1) // 5) * 5
         offset = max(0, min(offset, max_offset))
 
-        cur2 = con.cursor()
+        con2 = db()
+        cur2 = con2.cursor()
         cur2.execute(f"""
             SELECT r.id AS reg_id,
                    r.email AS email,
@@ -4005,7 +4004,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             LIMIT 5 OFFSET ?
         """, (user.id, offset))
         rows = cur2.fetchall()
-        con.close()
+        con2.close()
 
         page = offset // 5 + 1
         total_pages = max(1, (total + 4) // 5)

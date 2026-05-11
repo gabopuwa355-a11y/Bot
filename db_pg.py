@@ -86,18 +86,11 @@ def _pg_connect():
 
 
 def db():
-    """Drop-in for the SQLite db() function. Returns a PgConnectionWrapper."""
-    conn = getattr(_local, "conn", None)
-    if conn is None or conn.closed:
-        _local.conn = _pg_connect()
-        return _local.conn
-    # Check if connection is in broken/aborted state and reset it
-    try:
-        if conn._raw.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
-            conn._raw.rollback()
-    except Exception:
-        _local.conn = _pg_connect()
-    return _local.conn
+    """Drop-in for the SQLite db() function. Returns a fresh PgConnectionWrapper.
+    Always returns a new connection so multiple concurrent cursors don't conflict.
+    Callers must call con.close() when done.
+    """
+    return _pg_connect()
 
 
 # ── SQL translation helpers ──────────────────────────────────────────────────
