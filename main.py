@@ -890,7 +890,8 @@ def _build_account_lines(rows, user_id: int, now_ts: int) -> list:
             )
             lines.append(line)
         except Exception as e:
-            lines.append(f"━━━━━━━━━━━━━━━━━━\n⚠️ Error loading entry {i}: {e}")
+            import traceback
+            lines.append(f"━━━━━━━━━━━━━━━━━━\n⚠️ Error: {e}\n{traceback.format_exc()[-200:]}")
     return lines
 
 
