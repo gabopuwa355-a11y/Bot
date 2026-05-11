@@ -3956,7 +3956,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         con = db()
         cur = con.cursor()
 
-        _ALL_STATES = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt',timeout')"
+        _ALL_STATES = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt','timeout')"
 
         cur.execute(f"""
             SELECT COUNT(*) AS c
