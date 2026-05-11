@@ -87,7 +87,15 @@ def _pg_connect():
 
 def db():
     """Drop-in for the SQLite db() function. Returns a PgConnectionWrapper."""
-    if not getattr(_local, "conn", None) or _local.conn.closed:
+    conn = getattr(_local, "conn", None)
+    if conn is None or conn.closed:
+        _local.conn = _pg_connect()
+        return _local.conn
+    # Check if connection is in broken/aborted state and reset it
+    try:
+        if conn._raw.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
+            conn._raw.rollback()
+    except Exception:
         _local.conn = _pg_connect()
     return _local.conn
 
@@ -98,6 +106,20 @@ _AUTOINCREMENT_RE = re.compile(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", r
 _INTEGER_PK_RE = re.compile(r"\bINTEGER\s+PRIMARY\s+KEY\b(?!\s+AUTOINCREMENT)", re.IGNORECASE)
 _REAL_RE = re.compile(r"\bREAL\b", re.IGNORECASE)
 _TEXT_DEFAULT_EMPTY_RE = re.compile(r"TEXT\s+DEFAULT\s+''", re.IGNORECASE)
+
+# Per-table primary key column names for RETURNING clause
+# actions table has action_id (not id) — this was the root bug
+_TABLE_PK = {
+    "actions":       "action_id",
+    "registrations": "id",
+    "hold_credits":  "id",
+    "ledger":        "id",
+    "payouts":       "id",
+    "jobs":          "id",
+    "email_checks":  "id",
+    "form_table":    "id",
+    "referral_bonuses": "id",
+}
 
 
 def _translate_sql(sql: str) -> str | None:
@@ -175,6 +197,7 @@ def _translate_insert_or_replace(sql: str) -> str:
         "form_table": "reg_id",
         "precredits": "action_id",
         "referral_bonuses": "(referrer_id, referred_user_id)",
+        "admin_settings": "key",
     }
 
     s = re.sub(r"INSERT\s+OR\s+REPLACE\b", "INSERT", sql, flags=re.IGNORECASE)
@@ -244,13 +267,18 @@ class PgCursorWrapper:
         if translated is None:
             return  # silently skip (PRAGMA etc.)
 
-        # Append RETURNING id for INSERT statements so lastrowid works
+        # Append RETURNING <pk> for INSERT statements so lastrowid works
+        # BUGFIX: actions table uses action_id as PK (not id) — must use _TABLE_PK map
+        _pk_col = "id"
         needs_returning = (
             re.match(r"\s*INSERT\b", translated, re.IGNORECASE)
             and "RETURNING" not in translated.upper()
         )
         if needs_returning:
-            translated = translated.rstrip("; ") + " RETURNING id"
+            _tbl_m = re.search(r"INSERT\s+INTO\s+(\w+)", translated, re.IGNORECASE)
+            if _tbl_m:
+                _pk_col = _TABLE_PK.get(_tbl_m.group(1).lower(), "id")
+            translated = translated.rstrip("; ") + f" RETURNING {_pk_col}"
 
         try:
             self._cur.execute(translated, params or ())
@@ -264,14 +292,25 @@ class PgCursorWrapper:
         except psycopg2.errors.UniqueViolation:
             self._conn._raw.rollback()
             return
+        except psycopg2.errors.UndefinedTable:
+            # Table doesn't exist yet — rollback and skip silently
+            self._conn._raw.rollback()
+            return
+        except psycopg2.Error as e:
+            # Any other psycopg2 error — rollback to keep connection usable
+            try:
+                self._conn._raw.rollback()
+            except Exception:
+                pass
+            raise
 
-        # Capture lastrowid from RETURNING id
+        # Capture lastrowid from RETURNING <pk>
         if needs_returning:
             try:
                 row = self._cur.fetchone()
                 if row:
-                    # DictCursor returns OrderedDict
-                    val = row.get("id") if hasattr(row, "get") else row[0]
+                    # Use correct pk column name (not always "id")
+                    val = row.get(_pk_col) if hasattr(row, "get") else row[0]
                     self.lastrowid = val
             except Exception:
                 pass
@@ -297,23 +336,34 @@ class PgCursorWrapper:
         return [PgRow(r, keys) for r in raw_rows]
 
     def fetchone(self):
-        raw = self._cur.fetchone()
+        try:
+            raw = self._cur.fetchone()
+        except psycopg2.ProgrammingError:
+            return None
         if raw is None:
             return None
-        keys = [d[0] for d in self._cur.description] if self._cur.description else []
-        if isinstance(raw, dict):
-            return PgRow(raw, keys)
-        # fallback: plain tuple
-        return raw
+        if self._cur.description:
+            keys = [d[0] for d in self._cur.description]
+        elif hasattr(raw, 'keys'):
+            keys = list(raw.keys())
+        else:
+            return raw
+        return PgRow(dict(raw), keys)
 
     def fetchall(self):
-        rows = self._cur.fetchall()
+        try:
+            rows = self._cur.fetchall()
+        except psycopg2.ProgrammingError:
+            return []
         if not rows:
             return []
-        if not self._cur.description:
+        if self._cur.description:
+            keys = [d[0] for d in self._cur.description]
+        elif hasattr(rows[0], 'keys'):
+            keys = list(rows[0].keys())
+        else:
             return rows
-        keys = [d[0] for d in self._cur.description]
-        return [PgRow(r, keys) for r in rows]
+        return [PgRow(dict(r), keys) for r in rows]
 
     def __iter__(self):
         for row in self.fetchall():
@@ -408,9 +458,16 @@ def init_db():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS blocked_users(
         user_id BIGINT PRIMARY KEY,
-        blocked_at BIGINT
+        blocked_at BIGINT,
+        reason TEXT DEFAULT ''
     )
     """)
+    # Migration: add reason column if older DB doesn't have it
+    try:
+        cur.execute("ALTER TABLE blocked_users ADD COLUMN reason TEXT DEFAULT ''")
+        con.commit()
+    except Exception:
+        con.rollback()
 
     # ── pending_referrals ────────────────────────────────────────────────────
     cur.execute("""
@@ -662,6 +719,15 @@ def init_db():
         created_at BIGINT NOT NULL,
         updated_at BIGINT,
         error TEXT DEFAULT ''
+    )
+    """)
+
+    # ── admin_settings ───────────────────────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS admin_settings(
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at BIGINT
     )
     """)
 
