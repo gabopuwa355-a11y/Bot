@@ -3042,9 +3042,11 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         now_ts = int(time.time())
         lines = _build_account_lines(rows, user.id, now_ts)
+        print(f"[ACCT DEBUG] rows={len(rows)} lines={len(lines)} lines_content={lines}", flush=True)
         total_pages = max(1, (total + 4) // 5)
         header = f"📋 My Accounts — Page 1/{total_pages} ({total} total)\n"
         msg = header + "\n\n".join(lines)
+        print(f"[ACCT DEBUG] msg_len={len(msg)} msg={repr(msg[:300])}", flush=True)
         if len(msg) > 4000:
             msg = msg[:4000] + "\n..."
         await update.message.reply_text(msg, reply_markup=accounts_nav(0, total))
