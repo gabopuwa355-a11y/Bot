@@ -1862,22 +1862,25 @@ def get_profile_counts(user_id: int):
     - TOTAL CANCELED: registrations canceled
     """
     con = db()
-    cur = con.cursor()
 
-    cur.execute(
+    cur1 = con.cursor()
+    cur1.execute(
         "SELECT COUNT(*) AS c FROM actions WHERE user_id=? AND state IN ('waiting_admin','approved','rejected')",
         (int(user_id),),
     )
-    total = int(cur.fetchone()["c"] or 0)
+    total = int(cur1.fetchone()["c"] or 0)
 
-    cur.execute("SELECT COUNT(*) AS c FROM actions WHERE user_id=? AND state='approved'", (int(user_id),))
-    approved = int(cur.fetchone()["c"] or 0)
+    cur2 = con.cursor()
+    cur2.execute("SELECT COUNT(*) AS c FROM actions WHERE user_id=? AND state='approved'", (int(user_id),))
+    approved = int(cur2.fetchone()["c"] or 0)
 
-    cur.execute("SELECT COUNT(*) AS c FROM actions WHERE user_id=? AND state='rejected'", (int(user_id),))
-    rejected = int(cur.fetchone()["c"] or 0)
+    cur3 = con.cursor()
+    cur3.execute("SELECT COUNT(*) AS c FROM actions WHERE user_id=? AND state='rejected'", (int(user_id),))
+    rejected = int(cur3.fetchone()["c"] or 0)
 
-    cur.execute("SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='canceled'", (int(user_id),))
-    canceled = int(cur.fetchone()["c"] or 0)
+    cur4 = con.cursor()
+    cur4.execute("SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='canceled'", (int(user_id),))
+    canceled = int(cur4.fetchone()["c"] or 0)
 
     con.close()
     return total, approved, rejected, canceled
@@ -2995,9 +2998,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if txt_is(txt, "menu_accounts"):
         con = db()
-        cur = con.cursor()
-
-        cur.execute("""
+        cur1 = con.cursor()
+        cur1.execute("""
             SELECT COUNT(*) AS c
             FROM actions a
             JOIN registrations r ON r.id = a.reg_id
@@ -3005,14 +3007,15 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt','timeout'
             )
         """, (user.id,))
-        total = int(cur.fetchone()["c"])
+        total = int(cur1.fetchone()["c"])
 
         if total == 0:
             con.close()
             await update.message.reply_text(tr(user.id, "my_accounts_empty"))
             return
 
-        cur.execute("""
+        cur2 = con.cursor()
+        cur2.execute("""
             SELECT r.id AS reg_id,
                    r.email AS email,
                    a.action_id AS action_id,
@@ -3030,7 +3033,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ORDER BY COALESCE(a.updated_at, a.created_at) DESC
             LIMIT 5 OFFSET 0
         """, (user.id,))
-        rows = cur.fetchall()
+        rows = cur2.fetchall()
         con.close()
 
         now_ts = int(time.time())
@@ -3957,26 +3960,29 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("ACC:"):
         offset = int(data.split(":")[1])
         con = db()
-        cur = con.cursor()
 
         _ALL_STATES = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt','timeout')"
 
-        cur.execute(f"""
+        cur1 = con.cursor()
+        cur1.execute(f"""
             SELECT COUNT(*) AS c
             FROM actions a
             JOIN registrations r ON r.id=a.reg_id
             WHERE a.user_id=? AND a.state IN {_ALL_STATES}
         """, (user.id,))
-        total = int(cur.fetchone()["c"])
+        total = int(cur1.fetchone()["c"])
+
         if total == 0:
             con.close()
-            await q.edit_message_text(tr(user.id, "accounts_history_empty"))
+            await q.edit_message_text(tr(user.id, "my_accounts_empty"))
             return
 
-        # Clamp offset
-        offset = max(0, min(offset, max(0, total - 5)))
+        # Clamp offset correctly
+        max_offset = ((total - 1) // 5) * 5
+        offset = max(0, min(offset, max_offset))
 
-        cur.execute(f"""
+        cur2 = con.cursor()
+        cur2.execute(f"""
             SELECT r.id AS reg_id,
                    r.email AS email,
                    a.action_id AS action_id,
@@ -3992,7 +3998,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ORDER BY COALESCE(a.updated_at, a.created_at) DESC
             LIMIT 5 OFFSET ?
         """, (user.id, offset))
-        rows = cur.fetchall()
+        rows = cur2.fetchall()
         con.close()
 
         page = offset // 5 + 1

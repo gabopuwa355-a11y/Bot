@@ -336,17 +336,22 @@ class PgCursorWrapper:
         return [PgRow(r, keys) for r in raw_rows]
 
     def fetchone(self):
-        raw = self._cur.fetchone()
+        try:
+            raw = self._cur.fetchone()
+        except psycopg2.ProgrammingError:
+            return None
         if raw is None:
             return None
         keys = [d[0] for d in self._cur.description] if self._cur.description else []
         if isinstance(raw, dict):
             return PgRow(raw, keys)
-        # fallback: plain tuple
         return raw
 
     def fetchall(self):
-        rows = self._cur.fetchall()
+        try:
+            rows = self._cur.fetchall()
+        except psycopg2.ProgrammingError:
+            return []
         if not rows:
             return []
         if not self._cur.description:
