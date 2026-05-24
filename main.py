@@ -1,4 +1,21 @@
 # -*- coding: utf-8 -*-
+import os
+import shutil
+import subprocess
+
+print("pg_dump:", shutil.which("pg_dump"))
+print("psql:", shutil.which("psql"))
+
+try:
+    print(subprocess.check_output(["pg_dump", "--version"]).decode())
+except Exception as e:
+    print("pg_dump error:", e)
+
+try:
+    print(subprocess.check_output(["psql", "--version"]).decode())
+except Exception as e:
+    print("psql error:", e)
+
 import re
 import time
 from db_pg import sqlite3, db, init_db, DB  # PostgreSQL shim — replaces sqlite3
@@ -48,6 +65,79 @@ def dprint(*args, **kwargs):
     if DEBUG:
         builtins.dprint(*args, **kwargs)
 
+# =========================
+# IN-MEMORY CACHE (SPEED OPTIMIZATION)
+# DB hit sirf pehli baar, baad mein memory se instant response
+# =========================
+_balance_cache = {}   # {user_id: (main_balance, hold_balance, timestamp)}
+_lang_cache = {}      # {user_id: lang}
+_blocked_cache = {}   # {user_id: (is_blocked_bool, timestamp)}
+_channel_cache = {}   # {user_id: (is_member_bool, timestamp)} — Telegram API call cache
+_currency_cache = {}  # {user_id: (currency_str, timestamp)} — currency cache
+_CACHE_TTL = 30       # seconds — 30 sec baad fresh DB se fetch hoga
+_CHANNEL_CACHE_TTL = 120  # 2 min — channel membership check Telegram API cache
+
+def _cache_get_balance(user_id):
+    entry = _balance_cache.get(user_id)
+    if entry and (time.time() - entry[2]) < _CACHE_TTL:
+        return entry[0], entry[1]
+    return None
+
+def _cache_set_balance(user_id, main_b, hold_b):
+    _balance_cache[user_id] = (main_b, hold_b, time.time())
+
+def cache_invalidate_balance(user_id):
+    """Jab balance change ho (payout/approval) — call karo."""
+    _balance_cache.pop(user_id, None)
+
+def _cache_get_lang(user_id):
+    entry = _lang_cache.get(user_id)
+    if entry and (time.time() - entry[1]) < 300:  # lang 5 min cache
+        return entry[0]
+    return None
+
+def _cache_set_lang(user_id, lang):
+    _lang_cache[user_id] = (lang, time.time())
+
+def _cache_get_blocked(user_id):
+    entry = _blocked_cache.get(user_id)
+    if entry and (time.time() - entry[1]) < _CACHE_TTL:
+        return entry[0]
+    return None
+
+def _cache_set_blocked(user_id, blocked_bool):
+    _blocked_cache[user_id] = (blocked_bool, time.time())
+
+def cache_invalidate_blocked(user_id):
+    _blocked_cache.pop(user_id, None)
+
+# --- Channel membership cache (BIGGEST SPEED FIX — Telegram API 1-3 sec saved) ---
+def _cache_get_channel(user_id):
+    entry = _channel_cache.get(user_id)
+    if entry and (time.time() - entry[1]) < _CHANNEL_CACHE_TTL:
+        return entry[0]
+    return None
+
+def _cache_set_channel(user_id, is_member_bool):
+    _channel_cache[user_id] = (is_member_bool, time.time())
+
+def cache_invalidate_channel(user_id):
+    """Jab user CHK_JOIN press kare — fresh Telegram API check force karo."""
+    _channel_cache.pop(user_id, None)
+
+# --- Currency cache ---
+def _cache_get_currency(user_id):
+    entry = _currency_cache.get(user_id)
+    if entry and (time.time() - entry[1]) < 300:  # 5 min
+        return entry[0]
+    return None
+
+def _cache_set_currency(user_id, code):
+    _currency_cache[user_id] = (code, time.time())
+
+def cache_invalidate_currency(user_id):
+    _currency_cache.pop(user_id, None)
+
 USDT_RATE = float(os.environ.get("USDT_RATE") or "91")  # 1 USDT = ₹91 (fixed)
 
 def usd_to_inr_fixed(usd_amount: float) -> int:
@@ -65,7 +155,7 @@ def inr_to_usd_fixed(inr_amount: float) -> float:
     except Exception:
         return 0.0
 
-MANUAL_EMAIL_REASONS = ["Wrong password", "not logout account from your device", "block by Google", "not logging", "unknown error"]
+MANUAL_EMAIL_REASONS = ["Wrong password", "not logout account from your device", "Recovery phone not accessible", "Password recently changed", "Account Ban"]
 
 
 # Optional DNS lookup (for email domain MX checks)
@@ -83,8 +173,8 @@ ADMIN_ID = 7988263992  # only admin access
 PIN_CHAT_ID = None  # set to a group/channel id (bot must be admin) to pin messages there
 # Channels gate (user must join to use bot)
 REQUIRED_CHANNELS = [
-    ("@gmailharvesterofficial", "https://t.me/gmailharvesterofficial"),
-    ("@gmailearningnews", "https://t.me/gmailearningnews"),
+    ("@gmaillhelp", "https://t.me/gmaillhelp"),
+    ("@gmaillnews", "https://t.me/gmaillnews"),
 ]
 
 FINGERPRINT_PUBLIC_BASE_URL = ""  # device-verify webapp disabled; keep empty to avoid NameError
@@ -101,20 +191,20 @@ BOUNCE_POLL_INTERVALS = (1, 1, 2)  # total <= 4 sec
 
 
 # Tutorial videos (Telegram file_id) — works on Railway/Termux without local files
-VIDEO_FILE_ID_CREATE = "BAACAgUAAxkBAAIBImmQnFR75KNF4qzxT4uiN3bK9XCBAAJLGwACbBiJVGvSCPjuDQvxOgQ"
-VIDEO_FILE_ID_LOGOUT = "BAACAgUAAxkBAAIBhGmSCMPRmt0lpPxNI8FQd-S21kefAAKFHAACR9jJV93FvyDND0OeOgQ"
+VIDEO_FILE_ID_CREATE = "BAACAgUAAxkBAAIFRGoD9Ok-EtEex8mChlUJdNkZEoh0AAKrJAACClYgVI1GQRj1GtKjOwQ"
+VIDEO_FILE_ID_LOGOUT = "BAACAgUAAxkBAAMsacjjpEDnlOFct7m4SIRW_IYaEfoAAkYdAAKfvUFWfGP6l1Zu60k6BA"
 
 # (Legacy path variables kept empty for compatibility; not used)
 VIDEO_CREATE_PATHS = []
 VIDEO_LOGOUT_PATHS = []
 VIDEO_FILE_ID_CACHE = {"create": None, "logout": None}
 # Provisional HOLD credit added immediately when user confirms (reverted on admin reject)
-PRE_CREDIT_AMOUNT = 10.0
+PRE_CREDIT_AMOUNT = 08.0
 
 # Business rules
 MAX_PER_MIN = 3
 ACTION_TIMEOUT_HOURS = 20
-HOLD_TO_MAIN_AFTER_DAYS = 1
+HOLD_TO_MAIN_AFTER_DAYS = float(os.environ.get("HOLD_TO_MAIN_AFTER_DAYS", "1"))  # Admin env se set kare (e.g. 0.5 = 12 hours, 2 = 2 days)
 
 # CONFIRM AGAIN cooldown (prevents spam clicks without action)
 CONFIRM_COOLDOWN_SEC = 50  # wait before running real email check after CONFIRM AGAIN
@@ -129,6 +219,17 @@ TASK_MILESTONES = [10,20,50,100,1000]
 REFERRAL_COMMISSION_DEFAULT = 10.0
 # in-memory temp storage (preview data per user)
 temp_data = {}
+
+# =========================
+# SELL FLOW STATES
+# =========================
+STATE_WAIT_ENTRY    = "wait_entry"
+STATE_WAIT_EMAIL    = "wait_email"
+STATE_WAIT_PASSWORD = "wait_password"
+STATE_WAIT_RECOVERY = "wait_recovery"
+STATE_WAIT_2FA      = "wait_2fa"
+STATE_CONFIRM       = "confirm_data"
+STATE_WAIT_BULK     = "wait_bulk"
 
 # NOTE:
 # I am not implementing "random credential generation for paid registrations".
@@ -153,7 +254,13 @@ def ensure_user(user_id, username, referrer_id=None):
     """Ensure a user row exists; set referrer only once.
 
     NOTE: sqlite3 cursor returns tuples by default (unless row_factory is set). We keep tuple-safe code here.
+    SPEED OPTIMIZATION: Already-seen users ka username update skip karo (sirf pehli baar ya referrer set hone par DB hit).
     """
+    # Agar user already known hai aur koi referrer set nahi karna — DB skip
+    _seen_key = f"eu_{user_id}_{username}"
+    if not referrer_id and _seen_key in _lang_cache:
+        return  # Already processed, kuch naya nahi karna
+
     con = db()
     cur = con.cursor()
 
@@ -184,11 +291,17 @@ def ensure_user(user_id, username, referrer_id=None):
 
     con.commit()
     con.close()
+    # Mark as seen so next call (same username) skips DB
+    _lang_cache[_seen_key] = (username, time.time())
 
 def get_lang(user_id):
     """Safe language lookup with fallback during startup/migration."""
     if not user_id:
         return "en"
+    # Cache check pehle (SPEED OPTIMIZATION)
+    cached = _cache_get_lang(user_id)
+    if cached is not None:
+        return cached
     con = None
     try:
         con = db()
@@ -197,7 +310,9 @@ def get_lang(user_id):
         r = cur.fetchone()
         lang = r[0] if r and r[0] else "en"
         # agar DB mein 'hi' stored hai as default (purana data), 'en' return karo
-        return lang if lang in ('en', 'hi', 'ur') else "en"
+        lang = lang if lang in ('en', 'hi', 'ur') else "en"
+        _cache_set_lang(user_id, lang)
+        return lang
     except Exception:
         return "en"
     finally:
@@ -213,6 +328,7 @@ def set_lang(user_id, lang):
     cur.execute("UPDATE users SET lang=? WHERE user_id=?", (lang, user_id))
     con.commit()
     con.close()
+    _cache_set_lang(user_id, lang)  # Cache update
 
 
 # =========================
@@ -223,14 +339,14 @@ TRANSLATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tr
 def _default_translations():
     return {
         "en": {
-            "menu_register": "➕ Register a new account",
-            "menu_accounts": "📋 My accounts",
+            "menu_register": "💱 Sell your Gmail",
+            "menu_accounts": "📑 My accounts",
             "menu_balance": "💰 Balance",
             "menu_referrals": "👥 My referrals",
             "menu_settings": "⚙️ Settings",
-            "menu_task": "✅ TASK",
+            "menu_task": "📚Task",
             "menu_help": "💬 Help",
-            "menu_profile": "👤 Profile",
+            "menu_profile": "🙆 My status",
             "settings_language": "LANGUAGE🔤",
             "settings_currency": "💱 Currency",
             "back": "🔙 Back",
@@ -291,10 +407,10 @@ def _default_translations():
             "help_news": "Project News",
             "help_buy": "Buy Accounts",
             "task_menu_title": "✅ TASK MENU",
-            "task_approved": "Approved ✅: {value}",
-            "task_done": "✅ {m} APPROVE ✅ = ₹{m}",
-            "task_pending_ready": "🟡 {m} APPROVE ✅ = ₹{m}  (will add soon)",
-            "task_need_more": "⏳ {m} APPROVE ✅ = ₹{m}  (need {left} more)",
+            "task_approved": "🟢 Accepted: {value}",
+            "task_done": "✅ {m} 🟢 Accepted = ₹{m}",
+            "task_pending_ready": "🟡 {m} 🟢 Accepted = ₹{m}  (will add soon)",
+            "task_need_more": "⏳ {m} 🟢 Accepted = ₹{m}  (need {left} more)",
             "help_1_label": "⏰ What is Hold?",
             "help_2_label": "📲 How to avoid SMS confirmation?",
             "help_3_label": "🔴 Why is the account unavailable?",
@@ -349,7 +465,7 @@ def _default_translations():
             "menu_balance": "💰 बैलेंस",
             "menu_referrals": "👥 मेरे रेफरल",
             "menu_settings": "⚙️ सेटिंग्स",
-            "menu_task": "✅ टास्क",
+            "menu_task": "📚 टास्क",
             "menu_help": "💬 मदद",
             "menu_profile": "👤 प्रोफाइल",
             "settings_language": "LANGUAGE🔤",
@@ -412,10 +528,10 @@ def _default_translations():
             "help_news": "प्रोजेक्ट समाचार",
             "help_buy": "अकाउंट खरीदें",
             "task_menu_title": "✅ टास्क मेन्यू",
-            "task_approved": "Approved ✅: {value}",
-            "task_done": "✅ {m} APPROVE ✅ = ₹{m}",
-            "task_pending_ready": "🟡 {m} APPROVE ✅ = ₹{m}  (जल्द जोड़ दिया जाएगा)",
-            "task_need_more": "⏳ {m} APPROVE ✅ = ₹{m}  (और {left} चाहिए)",
+            "task_approved": "🟢 Accepted: {value}",
+            "task_done": "✅ {m} 🟢 Accepted = ₹{m}",
+            "task_pending_ready": "🟡 {m} 🟢 Accepted = ₹{m}  (जल्द जोड़ दिया जाएगा)",
+            "task_need_more": "⏳ {m} 🟢 Accepted = ₹{m}  (और {left} चाहिए)",
             "help_1_label": "⏰ होल्ड क्या है?",
             "help_2_label": "📲 SMS confirmation से कैसे बचें?",
             "help_3_label": "🔴 अकाउंट उपलब्ध क्यों नहीं है?",
@@ -611,9 +727,9 @@ def help_menu_kb(user_id: int) -> InlineKeyboardMarkup:
     rows = []
     for i in range(1,7):
         rows.append([InlineKeyboardButton(tr(user_id, f'help_{i}_label'), callback_data=f'HELP_{i}')])
-    rows.append([InlineKeyboardButton(tr(user_id,'help_support'), url='https://t.me/Ghservicesupport_bot')])
-    rows.append([InlineKeyboardButton(tr(user_id,'help_news'), url='https://t.me/gmailearningnews')])
-    rows.append([InlineKeyboardButton(tr(user_id,'help_buy'), url='http://t.me/GmailharvestertradeBot')])
+    rows.append([InlineKeyboardButton(tr(user_id,'help_support'), url='https://t.me/Gs24x7Bot')])
+    rows.append([InlineKeyboardButton(tr(user_id,'help_news'), url='https://t.me/gmaillnews')])
+    rows.append([InlineKeyboardButton(tr(user_id,'help_buy'), url='http://t.me/GmailstocksBot')])
     return InlineKeyboardMarkup(rows)
 
 def help_back_kb(user_id: int) -> InlineKeyboardMarkup:
@@ -623,7 +739,7 @@ def task_menu_text(user_id: int) -> str:
     con = db()
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='approved'", (user_id,))
-    approved = int(cur.fetchone()["c"])
+    accepted_count = int(cur.fetchone()["c"])
     cur.execute("SELECT milestone FROM task_rewards WHERE user_id=?", (user_id,))
     claimed = {int(r["milestone"]) for r in cur.fetchall()}
     con.close()
@@ -642,18 +758,18 @@ def task_menu_text(user_id: int) -> str:
 
     # Next unclaimed milestone
     next_milestone = next((m for m in TASK_MILESTONES if m not in claimed), None)
-    next_left = max(next_milestone - approved, 0) if next_milestone else 0
+    next_left = max(next_milestone - accepted_count, 0) if next_milestone else 0
 
     lines = []
     lines.append("🔥 TASK STREAK")
     lines.append("━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"Current approvals: {approved} 🔥")
+    lines.append(f"Current 🟢 Accepted: {accepted_count} 🔥")
     lines.append("")
     lines.append("BADGES EARNED:")
 
     for m in TASK_MILESTONES:
         icon, label, reward = BADGE_META[m]
-        left = max(m - approved, 0)
+        left = max(m - accepted_count, 0)
         if m in claimed:
             status = "✅"
             lines.append(f"  {icon} {label:<10}({m})  {status}")
@@ -673,6 +789,10 @@ def task_menu_text(user_id: int) -> str:
     return "\n".join(lines)
 
 def get_balances(user_id):
+    # Cache check pehle (SPEED OPTIMIZATION)
+    cached = _cache_get_balance(user_id)
+    if cached is not None:
+        return cached
     con = db()
     cur = con.cursor()
     cur.execute("SELECT main_balance, hold_balance FROM users WHERE user_id=?", (user_id,))
@@ -680,12 +800,17 @@ def get_balances(user_id):
     con.close()
     if not r:
         return 0.0, 0.0
-    return float(r[0]), float(r[1])
+    result = float(r[0]), float(r[1])
+    _cache_set_balance(user_id, result[0], result[1])
+    return result
 
 
 
 def apply_task_rewards(cur, user_id: int, approved_count: int) -> float:
     """Pay out milestone rewards to MAIN balance. Returns total newly paid."""
+    # Admin can disable task rewards globally
+    if get_setting("task_rewards") != "on":
+        return 0.0
     paid_total = 0.0
     for m in TASK_MILESTONES:
         if approved_count >= m:
@@ -709,11 +834,13 @@ def add_hold_credit(user_id, amount) -> int:
     def _op():
         con = db()
         cur = con.cursor()
-        hid = add_hold_credit_cur(cur, int(user_id), float(amount))
+        hid, _ = add_hold_credit_cur(cur, int(user_id), float(amount))
         con.commit()
         con.close()
         return int(hid)
-    return int(_db_write_retry(_op))
+    result = int(_db_write_retry(_op))
+    cache_invalidate_balance(user_id)  # Cache clear
+    return result
 
 def revert_hold_credit(hold_credit_id: int, user_id: int, amount: float) -> None:
     """Revert a previously added HOLD credit (prevent maturation + subtract from hold_balance)."""
@@ -724,37 +851,107 @@ def revert_hold_credit(hold_credit_id: int, user_id: int, amount: float) -> None
         con.commit()
         con.close()
     _db_write_retry(_op)
+    cache_invalidate_balance(user_id)  # Cache clear
 
 def move_matured_hold_to_main(user_id):
-    """Move matured HOLD credits to MAIN. Returns amount moved (float)."""
+    """Move matured HOLD credits to MAIN.
+    Returns (amount_moved, task_paid, ref_id, commission_amt).
+
+    FIXES:
+    - Bug 1: commission_pct transaction ke bahar fetch hota hai (nested connection deadlock fix)
+    - Bug 4: status update sirf pending rows pe hota hai, approved pe nahi
+    - hold_balance negative nahi ho sakta (GREATEST guard)
+    """
+    # Commission pehle lo — transaction ke bahar, alag connection issue na ho
+    commission_pct = get_referral_commission_pct()
+
     now = int(time.time())
     con = db()
     cur = con.cursor()
+
+    # Pehle matured rows fetch karo
     cur.execute(
-        """
-        SELECT id, amount FROM hold_credits
-        WHERE user_id=? AND moved=0 AND matured_at<=?
-        """,
+        "SELECT id, amount FROM hold_credits WHERE user_id=? AND moved=0 AND matured_at<=?",
         (user_id, now),
     )
     rows = cur.fetchall()
     if not rows:
         con.close()
-        return 0.0
+        return 0.0, 0.0, None, 0.0
 
     total = sum(float(x["amount"]) for x in rows)
+    ids = [str(x["id"]) for x in rows]
 
+    # 1. moved=1 PEHLE mark karo — spam rokne ke liye
+    cur.execute(f"UPDATE hold_credits SET moved=1 WHERE id IN ({','.join(['?']*len(ids))})", ids)
+
+    # 2. Balance update karo (GREATEST se hold_balance negative nahi ho sakta)
     cur.execute(
-        "UPDATE users SET hold_balance = hold_balance - ?, main_balance = main_balance + ? WHERE user_id=?",
+        "UPDATE users SET hold_balance = GREATEST(0, hold_balance - ?), main_balance = main_balance + ? WHERE user_id=?",
         (total, total, user_id),
     )
     add_ledger_entry_cur(cur, user_id, delta_main=float(total), delta_hold=-float(total), reason="HOLD matured to MAIN")
-    ids = [str(x["id"]) for x in rows]
-    cur.execute(f"UPDATE hold_credits SET moved=1 WHERE id IN ({','.join(ids)})")
 
+    # 3. Registration approve karo — sirf woh jo abhi bhi pending hain (Bug 4 fix)
+    cur.execute(
+        "SELECT a.action_id, a.reg_id FROM actions a "
+        "WHERE a.user_id=? AND a.state IN ('waiting_admin', 'confirmed_by_user', 'waiting_hold')",
+        (user_id,),
+    )
+    pending_actions = cur.fetchall()
+    for pa in pending_actions:
+        cur.execute(
+            "UPDATE actions SET state='approved', updated_at=? WHERE action_id=? AND state IN ('waiting_admin', 'confirmed_by_user', 'waiting_hold')",
+            (now, int(pa["action_id"])),
+        )
+        cur.execute(
+            "UPDATE registrations SET state='approved' WHERE id=? AND state != 'approved'",
+            (int(pa["reg_id"]),),
+        )
+
+    # 4. Referral commission (Bug 1 fix: commission_pct pehle se fetch hai, no nested DB call)
+    ref_id = None
+    commission_amt = 0.0
+    try:
+        cur.execute("SELECT referrer_id FROM users WHERE user_id=?", (int(user_id),))
+        ref_row = cur.fetchone()
+        if ref_row and ref_row["referrer_id"]:
+            ref_id = int(ref_row["referrer_id"])
+
+        if ref_id:
+            commission_amt = round(float(total) * commission_pct / 100.0, 2)
+            if commission_amt > 0 and get_setting("referral_rewards") == "on":
+                # Har registration pe commission milegi (no dedup)
+                cur.execute(
+                    "UPDATE users SET main_balance = main_balance + ? WHERE user_id=?",
+                    (commission_amt, ref_id),
+                )
+                add_ledger_entry_cur(cur, ref_id, delta_main=float(commission_amt), delta_hold=0.0,
+                                     reason=f"Referral commission from user {user_id}")
+                cur.execute(
+                    "INSERT INTO referral_bonuses(referrer_id, referred_user_id, amount, created_at) VALUES(?,?,?,?)",
+                    (ref_id, int(user_id), commission_amt, now),
+                )
+    except Exception as ref_err:
+        dprint(f"[SWEEPER] Referral commission error for user {user_id}: {ref_err!r}")
+        ref_id = None
+        commission_amt = 0.0
+
+    # 5. Task rewards — ab approved count sahi hoga (abhi approve hua upar)
+    cur.execute(
+        "SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='approved'",
+        (user_id,),
+    )
+    accepted_count = int(cur.fetchone()["c"])
+    task_paid = apply_task_rewards(cur, int(user_id), accepted_count)
+
+    # 6. Commit karo
     con.commit()
     con.close()
-    return float(total)
+    cache_invalidate_balance(user_id)
+    if ref_id:
+        cache_invalidate_balance(ref_id)
+    return float(total), float(task_paid), ref_id, float(commission_amt)
 
 
 def can_do_action(user_id):
@@ -788,7 +985,7 @@ def webapp_verify_kb():
         [InlineKeyboardButton("✅ I VERIFIED", callback_data="WEBAPP_CHECK")],
     ])
 
-MAIN_MENU = ReplyKeyboardMarkup([["➕ Register a new account", "📋 My accounts"],["💰 Balance", "👥 My referrals"],["⚙️ Settings", "✅ TASK"],["💬 Help", "👤 Profile"]], resize_keyboard=True)
+MAIN_MENU = ReplyKeyboardMarkup([["💲Sell", "📋 My accounts"],["💰 Balance", "👥 My referrals"],["⚙️ Settings", "✅ TASK"],["💬 Help", "👤 Profile"]], resize_keyboard=True)
 
 def reg_buttons(action_id):
     # STEP 1 — Initial buttons
@@ -841,43 +1038,16 @@ def _account_status_text(user_id: int, st: str, rstate: str, ev_status_norm: str
                           ev_reason: str, stime: int, now_ts: int) -> tuple:
     """
     Returns (status_text, extra_line) for a given action state.
-    rstate = registrations.state (e.g. confirmed_by_user, created, etc.)
-    extra_line is e.g. the hold expiry line, else "".
+    Only shows: Hold, Accepted, Rejected (with reason).
+    All other states are skipped (filtered out upstream).
     """
     extra = ""
 
-    if st == "shown":
-        if rstate == "confirmed_by_user":
-            status_text = "⚫ Registration is not over"
-        elif rstate == "created":
-            status_text = "⏳ Pending (not completed)"
-        else:
-            status_text = "⏳ Pending (not completed)"
+    if st == "waiting_admin":
+        status_text = "🟡 Hold"
 
-    elif st == "canceled_prompt":
-        status_text = "🚫 Canceled"
-
-    elif st == "done1":
-        # done1 + confirmed_by_user = user confirmed, email being verified
-        if rstate == "confirmed_by_user":
-            status_text = "⚫ Registration is not over"
-        else:
-            status_text = "🔄 Verifying Email..."
-
-    elif st in ("waiting_admin", "approved"):
-        try:
-            base_ts = int(stime or 0)
-        except Exception:
-            base_ts = 0
-        if base_ts and HOLD_TO_MAIN_AFTER_DAYS:
-            until_ts = base_ts + int(HOLD_TO_MAIN_AFTER_DAYS) * 24 * 3600
-            if now_ts < until_ts:
-                status_text = "🟡 Under Review / Hold"
-                extra = "\n⏳ Hold until: " + fmt_ts(until_ts)
-            else:
-                status_text = "🟢 Accepted"
-        else:
-            status_text = "🟢 Accepted"
+    elif st == "approved":
+        status_text = "🟢 Accepted"
 
     elif st == "rejected":
         if ev_status_norm in ("NOT_VERIFIED", "REJECTED") and ev_reason.strip():
@@ -885,26 +1055,27 @@ def _account_status_text(user_id: int, st: str, rstate: str, ev_status_norm: str
         else:
             status_text = "🔴 Rejected"
 
-    elif st == "canceled":
-        status_text = "🚫 Canceled"
-
-    elif st == "timeout":
-        status_text = "⏰ Timed Out"
-
     else:
-        status_text = f"❓ {st}"
+        # All other states hidden from user view
+        status_text = ""
 
     return status_text, extra
 
 
 def _build_account_lines(rows, user_id: int, now_ts: int) -> list:
-    """Build formatted lines for account history rows."""
+    """Build formatted lines for account history rows.
+    Only shows: Hold, Accepted, Rejected (with reason). Skips other states.
+    """
     lines = []
     dprint(f"[ACCOUNTS] _build_account_lines called, rows count: {len(rows)}", flush=True)
     for i, rr in enumerate(rows, 1):
         try:
             dprint(f"[ACCOUNTS] row {i} keys: {list(rr.keys())}", flush=True)
             st        = str(rr["astate"] or "").strip()
+            # Skip states that shouldn't be shown
+            if st not in ("waiting_admin", "approved", "rejected"):
+                dprint(f"[ACCOUNTS] row {i} skipped (state={st})", flush=True)
+                continue
             try:
                 rstate = str(rr["rstate"] or "").strip()
             except Exception:
@@ -927,14 +1098,53 @@ def _build_account_lines(rows, user_id: int, now_ts: int) -> list:
                 user_id, st, rstate, ev_norm, ev_reason, stime, now_ts
             )
 
+            if not status_text:
+                continue
+
             email_display = str(rr["email"] or "—")
-            time_display  = fmt_ts(stime) if stime else "—"
+
+            # Format submitted time in IST
+            try:
+                from datetime import timezone, timedelta
+                IST = timezone(timedelta(hours=5, minutes=30))
+                sub_ts = int(rr.get("sub_ts") or rr.get("stime") or 0)
+                if sub_ts:
+                    sub_time = datetime.fromtimestamp(sub_ts, tz=IST).strftime("%d %b %Y %I:%M %p")
+                    time_line = f"\n🕐 {sub_time} IST"
+                else:
+                    time_line = ""
+            except Exception:
+                time_line = ""
+
+            # Show "Hold until" only for waiting_admin (Hold) state
+            hold_until_line = ""
+            if st == "waiting_admin":
+                try:
+                    matured_at = int(rr.get("matured_at") or 0)
+                    if matured_at:
+                        from datetime import timezone, timedelta
+                        IST = timezone(timedelta(hours=5, minutes=30))
+                        mat_dt = datetime.fromtimestamp(matured_at, tz=IST)
+                        mat_str = mat_dt.strftime("%d %b %Y %I:%M %p IST")
+                        remaining_sec = matured_at - int(time.time())
+                        if remaining_sec > 0:
+                            hrs = remaining_sec // 3600
+                            mins = (remaining_sec % 3600) // 60
+                            if hrs > 0:
+                                remain_str = f"{hrs}h {mins}m remaining"
+                            else:
+                                remain_str = f"{mins}m remaining"
+                            hold_until_line = f"\n⏳ Hold until: {mat_str} ({remain_str})"
+                        else:
+                            hold_until_line = f"\n✅ Hold period over — processing soon"
+                except Exception:
+                    pass
 
             line = (
-                f"━━━━━━━━━━━━━━━━━━\n"
                 f"📧 {email_display}\n"
-                f"📌 {status_text}{extra}\n"
-                f"🕐 {time_display}"
+                f"📌 {status_text}"
+                f"{hold_until_line}"
+                f"{time_line}"
             )
             lines.append(line)
             dprint(f"[ACCOUNTS] row {i} appended OK: {email_display}", flush=True)
@@ -942,7 +1152,6 @@ def _build_account_lines(rows, user_id: int, now_ts: int) -> list:
             import traceback
             err = traceback.format_exc()
             dprint(f"[ACCOUNTS] row {i} ERROR: {e}\n{err}", flush=True)
-            lines.append(f"━━━━━━━━━━━━━━━━━━\n[row {i} error: {e}]")
     dprint(f"[ACCOUNTS] returning {len(lines)} lines", flush=True)
     return lines
 
@@ -994,14 +1203,21 @@ CURRENCY_CHOICES = [
 _rates_cache = {"ts": 0, "base": "INR", "rates": {}}  # refreshed at most once per hour
 
 def get_user_currency(user_id: int) -> str:
+    # Cache check pehle (SPEED OPTIMIZATION)
+    cached = _cache_get_currency(user_id)
+    if cached is not None:
+        return cached
     try:
         con = db()
         cur = con.cursor()
         cur.execute("SELECT currency FROM users WHERE user_id=?", (user_id,))
         row = cur.fetchone()
         if not row or not row[0]:
+            _cache_set_currency(user_id, "INR")
             return "INR"
-        return str(row[0]).upper().strip() or "INR"
+        result = str(row[0]).upper().strip() or "INR"
+        _cache_set_currency(user_id, result)
+        return result
     except Exception:
         return "INR"
     finally:
@@ -1019,6 +1235,7 @@ def set_user_currency(user_id: int, code: str):
     cur.execute("UPDATE users SET currency=? WHERE user_id=?", (code, user_id))
     con.commit()
     con.close()
+    _cache_set_currency(user_id, code)  # Cache update
 
 def _refresh_rates_if_needed():
     """Refresh INR-base FX rates with a 1-hour cache.
@@ -1163,19 +1380,24 @@ def usd_balance_sufficient(main_balance_inr: float, requested_usd: float) -> boo
 async def user_in_required_channels(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
     """
     Checks if user is member of all REQUIRED_CHANNELS.
-    NOTE: Bot must be admin of the channel to check membership.
-    If Telegram API throws any error (bot not admin, network issue etc),
-    we fail-open (return True) so users are NOT blocked by API errors.
+    SPEED OPTIMIZATION: Result 2 min tak cache — har message pe Telegram API call nahi.
     """
+    cached = _cache_get_channel(user_id)
+    if cached is not None:
+        return cached
+
     for chat_username, _url in REQUIRED_CHANNELS:
         try:
             m = await context.bot.get_chat_member(chat_id=chat_username, user_id=user_id)
             status = getattr(m, "status", None)
             if status in ("left", "kicked"):
+                _cache_set_channel(user_id, False)
                 return False
-        except Exception:
-            # Fail closed on API errors so access is not bypassed.
-            return False
+        except Exception as _e:
+            # Bot is not admin in channel or API error — skip this channel check
+            print(f"[CHANNEL CHECK] Warning: cannot check {chat_username}: {_e!r}", flush=True)
+            continue
+    _cache_set_channel(user_id, True)
     return True
 
 def join_channels_kb() -> InlineKeyboardMarkup:
@@ -1527,17 +1749,6 @@ def _email_sqlite_init():
             v TEXT NOT NULL
         )
     """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS otp_inbox (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            msg_id TEXT UNIQUE NOT NULL,
-            gmail_handle TEXT NOT NULL,
-            otp TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            received_at INTEGER NOT NULL,
-            delivered INTEGER NOT NULL DEFAULT 0
-        )
-    """)
     con.commit()
     con.close()
 
@@ -1728,139 +1939,6 @@ async def _gmail_sync_loop(poll_sec: int = 5, max_list: int = 200):
 
         await asyncio.sleep(int(poll_sec))
 
-
-# ─── OTP SYNC LOOP ────────────────────────────────────────────────────────────
-OTP_SUBJECTS = ["google", "verification code", "verify your email",
-                "confirm your email", "email address verification",
-                "your google verification code", "email verification"]
-OTP_RE = re.compile(r"\b(\d{6})\b")
-_otp_app_ref = None
-
-async def _otp_sync_loop(svc, poll_sec: int = 10):
-    """Scan Gmail INBOX+SPAM for OTP emails and deliver via Telegram."""
-    import base64
-
-    dprint("[OTP-SYNC] OTP sync loop started")
-    last_otp_msg_id = _email_get_meta("last_otp_msg_id", "")
-
-    def _get_body_text(payload):
-        parts = payload.get("parts") or []
-        if not parts:
-            data = (payload.get("body") or {}).get("data", "")
-            if data:
-                try:
-                    return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
-                except Exception:
-                    return ""
-            return ""
-        for part in parts:
-            mime = part.get("mimeType", "")
-            if mime == "text/plain":
-                data = (part.get("body") or {}).get("data", "")
-                if data:
-                    try:
-                        return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
-                    except Exception:
-                        pass
-            elif mime.startswith("multipart/"):
-                sub = _get_body_text(part)
-                if sub:
-                    return sub
-        return ""
-
-    def _is_otp_subject(subject: str) -> bool:
-        s = (subject or "").lower()
-        return any(kw in s for kw in OTP_SUBJECTS)
-
-    def _save_and_get_user(msg_id, gmail_handle, otp, subject, received_at):
-        con = db()
-        cur = con.cursor()
-        try:
-            cur.execute(
-                """INSERT INTO otp_inbox(msg_id, gmail_handle, otp, subject, received_at, delivered)
-                   VALUES(?,?,?,?,?,0)""",
-                (msg_id, gmail_handle, otp, subject, received_at),
-            )
-        except Exception:
-            con.commit(); con.close()
-            return None
-        cur.execute(
-            "SELECT user_id FROM registrations WHERE lower(email)=? ORDER BY created_at DESC LIMIT 1",
-            (f"{gmail_handle}@gmail.com",),
-        )
-        row = cur.fetchone()
-        user_id = int(row[0]) if row else None
-        if user_id:
-            cur.execute("UPDATE otp_inbox SET delivered=1 WHERE msg_id=?", (msg_id,))
-        con.commit(); con.close()
-        return user_id
-
-    while True:
-        try:
-            for label in ("inbox", "spam"):
-                q = f"label:{label} subject:google newer_than:2d"
-                res = svc.users().messages().list(userId="me", q=q, maxResults=50).execute()
-                msgs = res.get("messages", []) or []
-                for m in msgs:
-                    mid = m.get("id")
-                    if not mid or mid == last_otp_msg_id:
-                        break
-                    msg = svc.users().messages().get(userId="me", id=mid, format="full").execute()
-                    payload = msg.get("payload", {}) or {}
-                    headers = payload.get("headers", []) or []
-                    hdr = {h["name"].lower(): h["value"] for h in headers}
-                    subject = hdr.get("subject", "")
-                    if not _is_otp_subject(subject):
-                        continue
-                    to_val = hdr.get("to", "") + " " + hdr.get("delivered-to", "")
-                    to_matches = EMAIL_HANDLE_RE.findall(to_val)
-                    # Also check body for the sender's gmail
-                    body = _get_body_text(payload)
-                    snippet = msg.get("snippet", "") or ""
-                    full_text = body or snippet
-                    body_matches = EMAIL_HANDLE_RE.findall(full_text)
-                    all_handles = list(dict.fromkeys(
-                        [m.split("@")[0].lower().strip() for m in (to_matches + body_matches)]
-                    ))
-                    otp_matches = OTP_RE.findall(full_text + " " + snippet)
-                    if not otp_matches or not all_handles:
-                        continue
-                    otp = otp_matches[0]
-                    received_at = int(int(msg.get("internalDate", 0)) / 1000) or int(time.time())
-                    for gmail_handle in all_handles:
-                        user_id = _save_and_get_user(mid, gmail_handle, otp, subject, received_at)
-                        if user_id and _otp_app_ref:
-                            try:
-                                await _otp_app_ref.bot.send_message(
-                                    chat_id=int(user_id),
-                                    text=(
-                                        f"📧 *Google Verification Code*\n\n"
-                                        f"Email: `{gmail_handle}@gmail.com`\n"
-                                        f"🔑 OTP: `{otp}`\n\n"
-                                        f"Subject: {subject}"
-                                    ),
-                                    parse_mode="Markdown",
-                                )
-                                dprint(f"[OTP-SYNC] Delivered OTP {otp} → user {user_id} ({gmail_handle})")
-                                break
-                            except Exception as e:
-                                dprint(f"[OTP-SYNC] Delivery failed user {user_id}: {e!r}")
-
-            # Update marker
-            all_res = svc.users().messages().list(
-                userId="me", q="subject:google newer_than:2d", maxResults=1
-            ).execute()
-            all_msgs = all_res.get("messages", []) or []
-            if all_msgs:
-                new_marker = all_msgs[0].get("id", "")
-                if new_marker and new_marker != last_otp_msg_id:
-                    last_otp_msg_id = new_marker
-                    _email_set_meta("last_otp_msg_id", last_otp_msg_id)
-
-        except Exception as e:
-            dprint(f"[OTP-SYNC] tick error: {e!r}")
-
-        await asyncio.sleep(poll_sec)
 
 
 def is_upi_or_qr_used(value: str, kind: str, current_user_id: int) -> bool:
@@ -2276,13 +2354,13 @@ def get_referral_overview(referrer_id: int, limit: int = 10):
     con.close()
     return total_ref, total_earned, rows
 
-def save_form_row(reg_id: int, user_id: int, first_name: str, email: str, password: str, recovery_email: str, created_at: int):
+def save_form_row(reg_id: int, user_id: int, first_name: str, email: str, password: str, recovery_email: str, created_at: int, twofa_key: str = ""):
     con = db()
     cur = con.cursor()
     cur.execute(
-        "INSERT OR REPLACE INTO form_table(reg_id, user_id, first_name, email, password, recovery_email, created_at) "
-        "VALUES(?,?,?,?,?,?,?)",
-        (reg_id, user_id, first_name, email.lower(), password, recovery_email, created_at),
+        "INSERT OR REPLACE INTO form_table(reg_id, user_id, first_name, email, password, recovery_email, twofa_key, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (reg_id, user_id, first_name, email.lower(), password, recovery_email, twofa_key or "", created_at),
     )
     con.commit()
     con.close()
@@ -2426,10 +2504,15 @@ async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def admin_bot_stats() -> str:
     """Return a formatted stats summary for admin."""
+    from datetime import timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_dt = datetime.now(IST)
+    # IST midnight (today's start) as UTC timestamp
+    ist_midnight = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = int(ist_midnight.timestamp())
+
     con = db()
     cur = con.cursor()
-    now = int(time.time())
-    today_start = int(time.mktime(time.localtime(now)[:3] + (0,0,0,0,0,-1)))
 
     cur.execute("SELECT COUNT(*) FROM users")
     total_users = int(cur.fetchone()[0] or 0)
@@ -2484,7 +2567,7 @@ def admin_bot_stats() -> str:
         f"  • Total Main: `₹{total_main_bal:,.2f}`",
         f"  • Total Hold: `₹{total_hold_bal:,.2f}`",
         "",
-        f"🕐 `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`",
+        f"🕐 `{now_dt.strftime('%d %b %Y %I:%M %p')} IST`",
     ]
     return "\n".join(lines)
 
@@ -2545,14 +2628,15 @@ def export_form_csv(rows) -> str:
     import csv, io
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["#", "UserID", "FirstName", "Email", "Password", "Recovery Email", "Time"])
+    writer.writerow(["#", "UserID", "FirstName", "Email", "Password", "Recovery Email", "2FA Key", "Time"])
     for i, r in enumerate(rows, 1):
         try:
             t = datetime.fromtimestamp(int(r["created_at"])).strftime("%Y-%m-%d %H:%M")
         except Exception:
             t = str(r["created_at"])
         writer.writerow([i, r["user_id"], r["first_name"] or "", r["email"] or "",
-                         r["password"] or "", r["recovery_email"] or "", t])
+                         r["password"] or "", r["recovery_email"] or "",
+                         r.get("twofa_key") or "", t])
     return output.getvalue()
 
 
@@ -2560,7 +2644,7 @@ def _fetch_form_rows(limit: int = 50):
     con = db()
     cur = con.cursor()
     cur.execute(
-        "SELECT user_id, first_name, email, recovery_email, password, created_at "
+        "SELECT user_id, first_name, email, recovery_email, password, twofa_key, created_at "
         "FROM form_table ORDER BY id DESC LIMIT ?",
         (limit,),
     )
@@ -2573,7 +2657,7 @@ def _fetch_form_rows_range(start_ts: int | None = None, end_ts: int | None = Non
     """Fetch rows from form_table optionally filtered by created_at [start_ts, end_ts)."""
     con = db()
     cur = con.cursor()
-    q = "SELECT user_id, first_name, email, recovery_email, password, created_at FROM form_table"
+    q = "SELECT user_id, first_name, email, recovery_email, password, twofa_key, created_at FROM form_table"
     params = []
     where = []
     if start_ts is not None:
@@ -2626,7 +2710,7 @@ def export_form_pdf(out_path: str = "form_data.pdf", limit: int = 50, *, rows=No
     header_style.textColor = colors.white
     header_style.fontName = "Helvetica-Bold"
 
-    headers = ["#", "USERID", "FIRSTNAME", "EMAIL", "PASSWORD", "RECOVERY EMAIL", "TIME"]
+    headers = ["#", "USERID", "FIRSTNAME", "EMAIL", "PASSWORD", "RECOVERY EMAIL", "2FA KEY", "TIME"]
     table_data = [[Paragraph(h, header_style) for h in headers]]
 
     for r in rows:
@@ -2641,11 +2725,12 @@ def export_form_pdf(out_path: str = "form_data.pdf", limit: int = 50, *, rows=No
             Paragraph(str(r["email"] or ""), small_style),
             Paragraph(str(r["password"] or ""), small_style),
             Paragraph(str(r["recovery_email"] or ""), small_style),
+            Paragraph(str(r.get("twofa_key") or ""), small_style),
             Paragraph(t, small_style),
         ])
 
     # Column widths for landscape A4 (usable ~800pt)
-    col_widths = [28, 50, 70, 165, 130, 160, 85]
+    col_widths = [22, 45, 60, 145, 115, 140, 100, 75]
 
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
@@ -2695,7 +2780,6 @@ def get_admin_setting(key: str, default=None):
     try:
         con = db()
         cur = con.cursor()
-        cur.execute("CREATE TABLE IF NOT EXISTS admin_settings(key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)")
         cur.execute("SELECT value FROM admin_settings WHERE key=?", (key,))
         r = cur.fetchone()
         con.close()
@@ -2710,7 +2794,6 @@ def set_admin_setting(key: str, value: str):
     try:
         con = db()
         cur = con.cursor()
-        cur.execute("CREATE TABLE IF NOT EXISTS admin_settings(key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)")
         cur.execute(
             "INSERT OR REPLACE INTO admin_settings(key, value, updated_at) VALUES(?,?,?)",
             (key, str(value), int(time.time()))
@@ -2720,22 +2803,6 @@ def set_admin_setting(key: str, value: str):
     except Exception:
         pass
 
-def is_maintenance_mode() -> bool:
-    return get_admin_setting("maintenance", "0") == "1"
-
-def get_announcement() -> str:
-    return get_admin_setting("announcement", "") or ""
-
-def get_payout_limits() -> tuple:
-    """Returns (min_inr, max_inr)."""
-    try:
-        mn = int(get_admin_setting("payout_min", "55") or 55)
-        mx = int(get_admin_setting("payout_max", "1050") or 1050)
-        return mn, mx
-    except Exception:
-        return 55, 1050
-
-
 def get_referral_commission_pct() -> float:
     """Returns current referral commission % from admin_settings. Default = REFERRAL_COMMISSION_DEFAULT."""
     try:
@@ -2744,6 +2811,18 @@ def get_referral_commission_pct() -> float:
         return max(0.0, min(100.0, pct))
     except Exception:
         return float(REFERRAL_COMMISSION_DEFAULT)
+
+# =========================
+# REWARD TOGGLE HELPERS
+# =========================
+
+def get_setting(key: str, default: str = "on") -> str:
+    """Get an admin_settings value by key, with default fallback."""
+    return str(get_admin_setting(key, default) or default)
+
+def set_setting(key: str, value: str) -> None:
+    """Set an admin_settings key to value."""
+    set_admin_setting(key, value)
 
 def is_admin(user_id):
     return user_id == ADMIN_ID
@@ -2773,13 +2852,19 @@ def _ensure_blocked_users_table():
 _ensure_blocked_users_table()
 
 def is_blocked(user_id: int) -> bool:
+    # Cache check (SPEED OPTIMIZATION) — har message pe DB hit nahi
+    cached = _cache_get_blocked(user_id)
+    if cached is not None:
+        return cached
     try:
         con = db()
         cur = con.cursor()
         cur.execute("SELECT 1 FROM blocked_users WHERE user_id=?", (int(user_id),))
         r = cur.fetchone()
         con.close()
-        return r is not None
+        result = r is not None
+        _cache_set_blocked(user_id, result)
+        return result
     except Exception:
         return False
 
@@ -2792,6 +2877,7 @@ def block_user_db(user_id: int, reason: str = ""):
     )
     con.commit()
     con.close()
+    _cache_set_blocked(user_id, True)  # Cache update
 
 def get_block_info(user_id: int):
     """Returns (blocked_at, reason) or None if not blocked."""
@@ -2823,6 +2909,7 @@ def unblock_user_db(user_id: int):
     cur.execute("DELETE FROM blocked_users WHERE user_id=?", (int(user_id),))
     con.commit()
     con.close()
+    _cache_set_blocked(user_id, False)  # Cache update
 
 def action_valid(action_id):
     con = db()
@@ -2844,17 +2931,19 @@ def action_valid(action_id):
     return True, a
 
 def _db_write_retry(fn, retries: int = 3, base_sleep: float = 0.05):
-    """Serialize SQLite writes + tiny retries (no long waits).
+    """Serialize DB writes + tiny retries.
 
     - Uses a process-wide re-entrant lock so admin/user callbacks don't write concurrently.
-    - Retries only a few times with very small sleep to avoid noticeable delays.
+    - Catches both sqlite3 and psycopg2 OperationalError (PostgreSQL compatibility fix).
     """
+    import psycopg2 as _psycopg2
+    _op_errors = (sqlite3.OperationalError, _psycopg2.OperationalError)
     for _ in range(int(retries)):
         try:
             with DB_WRITE_LOCK:
                 return fn()
-        except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower():
+        except _op_errors as e:
+            if "locked" in str(e).lower() or "could not obtain" in str(e).lower():
                 time.sleep(float(base_sleep))
                 continue
             raise
@@ -2897,17 +2986,18 @@ def add_ledger_entry_cur(cur, user_id: int, delta_main: float = 0.0, delta_hold:
     )
 
 
-def add_hold_credit_cur(cur, user_id: int, amount: float) -> int:
-    """Add amount to HOLD and create a hold_credits row using the SAME cursor/connection."""
+def add_hold_credit_cur(cur, user_id: int, amount: float):
+    """Add amount to HOLD and create a hold_credits row using the SAME cursor/connection.
+    Returns (hold_credit_id, matured_at) so caller can schedule instant trigger."""
     now = int(time.time())
-    matured_at = now + int(HOLD_TO_MAIN_AFTER_DAYS) * 24 * 3600
+    matured_at = now + int(float(HOLD_TO_MAIN_AFTER_DAYS) * 24 * 3600)
     cur.execute("UPDATE users SET hold_balance = hold_balance + ? WHERE user_id=?", (float(amount), int(user_id)))
     add_ledger_entry_cur(cur, int(user_id), delta_hold=float(amount), reason="HOLD credit added")
     cur.execute(
         "INSERT INTO hold_credits(user_id, amount, created_at, matured_at, moved) VALUES(?,?,?,?,0)",
         (int(user_id), float(amount), now, matured_at),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid), matured_at
 
 
 def revert_hold_credit_cur(cur, hold_credit_id: int, user_id: int, amount: float) -> None:
@@ -2946,42 +3036,79 @@ def set_reg_state(reg_id, state):
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    try:
+        # Parse referral FIRST so we don't lose it if user must join channels first
+        ref = None
+        if user and context.args:
+            arg0 = str(context.args[0]).strip()
+            if arg0.startswith('ref_') and arg0[4:].isdigit():
+                rid = int(arg0[4:])
+                if rid != user.id:
+                    ref = rid
+            elif arg0.isdigit():
+                rid = int(arg0)
+                if rid != user.id:
+                    ref = rid
 
-    # Parse referral FIRST so we don't lose it if user must join channels first
-    ref = None
-    if user and context.args:
-        arg0 = str(context.args[0]).strip()
-        if arg0.startswith('ref_') and arg0[4:].isdigit():
-            rid = int(arg0[4:])
-            if rid != user.id:
-                ref = rid
-        elif arg0.isdigit():
-            rid = int(arg0)
-            if rid != user.id:
-                ref = rid
-
-    # Gate check (required channel join)
-    if not await gate_if_not_joined(update, context):
+        # Save referral before gate check
         if user and ref:
             set_pending_ref(user.id, ref)
-        return
 
-    # If user passed gate, use ref from start param OR pending saved earlier
-    if user:
-        pending = pop_pending_ref(user.id)
-        if not ref and pending:
-            ref = pending
+        # Check if already joined — existing users go straight to menu
+        already_joined = await user_in_required_channels(context, user.id)
 
-        ensure_user(user.id, user.username or user.full_name, referrer_id=ref)
+        if already_joined:
+            if user:
+                pending = pop_pending_ref(user.id)
+                if not ref and pending:
+                    ref = pending
+                ensure_user(user.id, user.username or user.full_name, referrer_id=ref)
+            await update.message.reply_text(tr(user.id, "welcome_menu"), reply_markup=main_menu_markup(user.id))
+            return
 
-        moved = move_matured_hold_to_main(user.id)
-        if moved > 0:
-            try:
-                await context.bot.send_message(chat_id=user.id, text=tr(user.id, "funds_accrual"))
-            except Exception:
-                pass
+        # New/unjoined user — show welcome + channel join
+        welcome_text = (
+            "👋 Yaar, sahi jagah aaye ho!\n\n"
+            "💰 Gmail Account Banao — Paisa Kamao!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🎯 Kaam kya hai?\n"
+            "Bas Gmail account banane hai — aur tumhe milenge paise seedha UPI mein!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "💵 Kitna milega?\n"
+            "✅ Har Gmail ke → ₹08 - ₹10\n"
+            "👥 Dost refer karo → Extra bonus\n"
+            "🏆 Jitna karo, utna kamao — koi limit nahi!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "⚡ Shuru kaise karein?\n"
+            "1️⃣ Neeche diye channels join karo\n"
+            "2️⃣ ✅ I JOINED button dabao\n"
+            "3️⃣ Bot tumhe sab sikhayega — step by step!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📢 Channels join karna kyun zaroori hai?\n"
+            "🔔 Naye tasks aur updates sabse pehle channel pe aate hain\n"
+            "💡 Tips & tricks milti hain jisse aur zyada kamao\n"
+            "🛡️ Sirf channel members ko hi bot ka access milta hai\n"
+            "👨\u200d👩\u200d👧 Hamaari community se judo — akele mat karo!\n\n"
+            "➡️ In channels ko join karo aur apni earning shuru karo:"
+        )
+        await update.message.reply_text(welcome_text, reply_markup=join_channels_kb())
 
-    await update.message.reply_text(tr(user.id, "welcome_menu"), reply_markup=main_menu_markup(user.id))
+    except Exception as e:
+        import traceback
+        print(f"[START ERROR] {e!r}\n{traceback.format_exc()}", flush=True)
+        try:
+            # Retry ensure_user once before giving up
+            if user:
+                try:
+                    ensure_user(user.id, user.username or user.full_name)
+                except Exception:
+                    pass
+            await update.message.reply_text(
+                tr(user.id if user else 0, "welcome_menu"),
+                reply_markup=main_menu_markup(user.id if user else 0)
+            )
+        except Exception:
+            pass
 
 
 
@@ -2992,28 +3119,16 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id != ADMIN_ID and is_blocked(user.id):
         return
 
-    # Maintenance mode — block all non-admin actions
-    if user.id != ADMIN_ID and is_maintenance_mode():
-        await update.message.reply_text(
-            "🔧 Bot is under maintenance. Please try again later."
-        )
-        return
-
     ensure_user(user.id, user.username or user.full_name)
-    moved = move_matured_hold_to_main(user.id)
-    if moved > 0:
-        try:
-            await context.bot.send_message(chat_id=user.id, text=tr(user.id, "funds_accrual"))
-        except Exception:
-            pass
 
-    # Announcement banner — show once per menu tap if set
-    ann = get_announcement()
-    if ann and not is_admin(user.id):
-        try:
-            await update.message.reply_text(f"📢 {ann}")
-        except Exception:
-            pass
+    # ── QR photo in 2FA wait state → auto-extract secret ────────────────────
+    if (
+        context.user_data.get("sell_state") == STATE_WAIT_2FA
+        and update.message
+        and update.message.photo
+    ):
+        await _handle_qr_photo_for_2fa(update, context)
+        return
 
     txt = update.message.text.strip()
 
@@ -3031,7 +3146,12 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await send_configured_autoreply(update, context)
                 except Exception:
                     pass
-                
+
+    # ── Sell flow text input handler ──────────────────────────────────
+    if context.user_data.get("sell_state"):
+        handled = await _handle_sell_flow(update, context)
+        if handled:
+            return
 
     
     if txt_is(txt, "menu_register"):
@@ -3039,7 +3159,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if txt_is(txt, "menu_accounts"):
-        _ALL_ST = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt','timeout')"
+        _ALL_ST = "('waiting_admin','approved','rejected')"
         dprint(f"[ACCOUNTS-MENU] user={user.id} tapped My Accounts", flush=True)
         con = db()
         cur = con.cursor()
@@ -3072,12 +3192,16 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     a.action_id AS action_id,
                     a.state AS astate,
                     COALESCE(a.updated_at, a.created_at) AS stime,
+                    a.created_at AS sub_ts,
                     ev.status AS ev_status,
                     ev.reason AS ev_reason,
-                    r.state AS rstate
+                    r.state AS rstate,
+                    hc.matured_at AS matured_at
                 FROM actions a
                 JOIN registrations r ON r.id = a.reg_id
                 LEFT JOIN admin_email_verify ev ON ev.action_id = a.action_id
+                LEFT JOIN precredits pc ON pc.action_id = a.action_id
+                LEFT JOIN hold_credits hc ON hc.id = pc.hold_credit_id
                 WHERE a.user_id = ? AND a.state IN {_ALL_ST}
                 ORDER BY COALESCE(a.updated_at, a.created_at) DESC
                 LIMIT 5 OFFSET 0
@@ -3269,7 +3393,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             uname = x.get("username") or str(x.get("user_id"))
             approved = int(x.get("approved_count") or 0)
             earned = round(approved * commission_per, 2)
-            top3_lines.append(f"{medals[idx]} @{uname}  |  {approved} approved  |  ₹{earned:.2f}")
+            top3_lines.append(f"{medals[idx]} @{uname}  |  {approved} 🟢 Accepted  |  ₹{earned:.2f}")
         top3_str = "\n".join(top3_lines) if top3_lines else "— no referrals yet —"
 
         # Active = referred users with at least 1 approval
@@ -3506,7 +3630,7 @@ def random_first_name():
     return name.capitalize()
 
 def random_last_name():
-    length = random.choice([4, 5, 6,])
+    length = random.choice([4, 5,])
     name = ""
     for i in range(length):
         if i % 2 == 0:
@@ -3515,46 +3639,57 @@ def random_last_name():
             name += random.choice(VOWELS)
     return name.capitalize()
 
+
 # ----------------------------
-# EMAIL - only letters + numbers
+# PRONOUNCEABLE WORD GENERATOR
+# ----------------------------
+
+VOWELS = "aeiou"
+CONSONANTS = "bcdfghjklmnpqrstvwxyz"
+
+
+def make_pronounceable(length):
+    word = ""
+    use_consonant = random.choice([True, False])
+
+    while len(word) < length:
+        if use_consonant:
+            word += random.choice(CONSONANTS)
+        else:
+            word += random.choice(VOWELS)
+
+        use_consonant = not use_consonant
+
+    return word[:length]
+
+
+# ----------------------------
+# EMAIL
+# Word length: 8-18
+# Number only at end
 # ----------------------------
 
 def random_email(first_name, last_name):
-    fn = first_name.lower()
-    ln = last_name.lower()
 
-    letters = "abcdefghijklmnopqrstuvwxyz"
+    def rand_num():
+        return random.choice([
+            str(random.randint(1, 9)),         # 1 digit
+            str(random.randint(10, 99)),       # 2 digit
+            str(random.randint(100, 999)),     # 3 digit
+            str(random.randint(1000, 9999))    # 4 digit
+        ])
 
-    def rand_word(min_l, max_l):
-        return "".join(random.choice(letters) for _ in range(random.randint(min_l, max_l)))
+    # ONLY word part length random
+    word_length = random.randint(8, 15)
 
-    def rand_num(a, b):
-        return str(random.randint(a, b))
+    # pronounceable username
+    username = make_pronounceable(word_length)
 
-    fn_char  = random.choice(fn)
-    ln_char  = random.choice(ln)
-    fn_2char = fn[:2]
-    ln_2char = ln[:2]
+    # add number only at end
+    username += rand_num()
 
-    styles = [
-        f"{rand_word(3,5)}{fn_char}{rand_word(2,4)}{rand_num(10,999)}",
-        f"{rand_word(4,6)}{ln_char}{rand_word(2,4)}{rand_num(10,99)}",
-        f"{fn_char}{rand_word(4,7)}{rand_num(100,9999)}",
-        f"{ln_char}{rand_word(4,6)}{rand_num(10,999)}",
-        f"{fn_2char}{rand_word(4,6)}{rand_num(10,999)}",
-        f"{ln_2char}{rand_word(3,6)}{rand_num(10,99)}",
-        f"{rand_word(3,5)}{fn_2char}{rand_num(100,9999)}",
-        f"{rand_word(3,5)}{ln_2char}{rand_word(2,4)}{rand_num(10,99)}",
-        f"{fn_char}{rand_word(2,4)}{ln_char}{rand_word(2,4)}{rand_num(10,99)}",
-        f"{fn_2char}{ln_2char}{rand_word(3,5)}{rand_num(10,999)}",
-        f"{rand_word(2,4)}{fn_char}{ln_char}{rand_word(2,4)}{rand_num(10,99)}",
-        f"{rand_word(5,9)}{rand_num(10,9999)}",
-        f"{rand_word(6,10)}{rand_num(100,999)}",
-        f"{rand_word(4,8)}{rand_num(10,99)}",
-        f"{rand_word(7,11)}{rand_num(1,99)}",
-    ]
+    return f"{username}@gmail.com"
 
-    return f"{random.choice(styles)}@gmail.com"
 
 # ----------------------------
 # STRONG PASSWORD (no 0, no l)
@@ -3562,12 +3697,12 @@ def random_email(first_name, last_name):
 # ----------------------------
 
 def strong_password():
-    length = random.choice([8, 9, 10, 11, 12, 13, 14, 15])
+    length = random.choice([10, 11, 12, 13, 14, 15])
 
     uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-    lowercase  = "abcdefghijkmnopqrstuvwxyz"
-    numbers    = "123456789"
-    symbols    = "!@#$&₹?"
+    lowercase = "abcdefghijkmnopqrstuvwxyz"
+    numbers = "123456789"
+    symbols = "!@#$&+%₹?"
 
     all_chars = uppercase + lowercase + numbers + symbols
 
@@ -3582,157 +3717,606 @@ def strong_password():
     ]
 
     pwd += random.choices(all_chars, k=length - len(pwd))
+
     random.shuffle(pwd)
+
     return "".join(pwd)
 
+
 # ----------------------------
-# RECOVERY EMAIL - only letters + numbers
+# RECOVERY EMAIL
+# pronounceable + numbers
 # ----------------------------
 
 def random_recovery_email():
-    letters = "abcdefghijklmnopqrstuvwxyz"
 
-    def part(min_l, max_l):
-        return "".join(random.choice(letters) for _ in range(random.randint(min_l, max_l)))
+    def rand_num():
+        return random.choice([
+            str(random.randint(1, 99)),
+            str(random.randint(100, 999)),
+            str(random.randint(1000, 9999))
+        ])
 
-    def rand_num(a, b):
-        return str(random.randint(a, b))
+    word_length = random.randint(6, 14)
 
-    styles = [
-        f"{part(4,7)}{part(3,6)}{rand_num(10,999)}",
-        f"{part(4,8)}{rand_num(10,99)}",
-        f"{part(5,8)}{rand_num(100,9999)}",
-        f"{part(6,10)}{rand_num(10,999)}",
-        f"{part(4,6)}{part(3,5)}{rand_num(1,99)}",
-        f"{part(7,11)}{rand_num(10,99)}",
-        f"{part(5,9)}{rand_num(10,99)}",
-    ]
+    username = make_pronounceable(word_length)
 
-    return f"{random.choice(styles)}@xyzbaazar.com"
+    username += rand_num()
+
+    return f"{username}@xyzbaazar.com"
+
 
 # =========================
-# REGISTER (THIS MUST BE ASYNC)
+# SELL FLOW — DUPLICATE CHECK HELPERS
 # =========================
-async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+def _email_exists_in_db(email: str) -> bool:
+    try:
+        con = db(); cur = con.cursor()
+        cur.execute("SELECT id FROM registrations WHERE email=?", (email.lower().strip(),))
+        r = cur.fetchone(); con.close()
+        return r is not None
+    except Exception:
+        return False
+
+def _password_exists_in_db(password: str) -> bool:
+    try:
+        con = db(); cur = con.cursor()
+        cur.execute("SELECT id FROM registrations WHERE password=?", (password,))
+        r = cur.fetchone(); con.close()
+        return r is not None
+    except Exception:
+        return False
+
+def _recovery_email_exists_in_db(recovery_email: str) -> bool:
+    try:
+        con = db(); cur = con.cursor()
+        cur.execute("SELECT id FROM registrations WHERE recovery_email=?", (recovery_email.lower().strip(),))
+        r = cur.fetchone(); con.close()
+        return r is not None
+    except Exception:
+        return False
+
+# =========================
+# SELL FLOW — KEYBOARDS
+# =========================
+
+def _sell_cancel_kb():
+    return ReplyKeyboardMarkup([["⊖ Cancel registration"]], resize_keyboard=True)
+
+async def _handle_qr_photo_for_2fa(update, context):
+    """User ne 2FA QR code ki photo bheji — auto-extract secret aur save karo.
+    Handles: plain QR, screenshot-in-screenshot, small QR inside Google UI, etc.
+    """
+    import io, urllib.parse
     user = update.effective_user
+    try:
+        # Download highest-res photo Telegram provides
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
 
-    # Generate names first
-    first_name = random_first_name()
-    last_name = random_last_name()
+        secret = None
+        otpauth_uri = None
 
-    # Generate preview data
-    data = {
-        "first_name": first_name,
-        "last_name": last_name,
-        "email": random_email(first_name, last_name),
-        "password": strong_password(),
-        "recovery_email": random_recovery_email(),
-    }
+        # ── Helper: parse otpauth URI → secret ───────────────────────────────
+        def _extract_secret_from_uri(uri):
+            try:
+                parsed = urllib.parse.urlparse(uri)
+                qs = urllib.parse.parse_qs(parsed.query)
+                vals = qs.get("secret", [])
+                return vals[0].strip().upper() if vals else None
+            except Exception:
+                return None
 
-    temp_data[user.id] = data
+        # ── Helper: scan one PIL image — opencv first, pyzbar fallback ─────
+        def _pyzbar_scan(im):
+            from PIL import ImageEnhance
+            import numpy as np
 
-    # Create DB rows (registration + action) so callbacks can work
+            gray = im.convert("L")
+            candidates = [
+                im,
+                gray,
+                ImageEnhance.Contrast(gray).enhance(2.0),
+                gray.point(lambda x: 0 if x < 128 else 255),
+            ]
+            if im.width < 800:
+                candidates.append(im.resize((im.width * 2, im.height * 2), Image.LANCZOS))
+
+            # ── Try opencv QRCodeDetector (no system lib needed) ─────────────
+            try:
+                import cv2
+                detector = cv2.QRCodeDetector()
+                for c in candidates:
+                    arr = np.array(c.convert("RGB"))
+                    bgr = arr[:, :, ::-1]  # RGB → BGR
+                    data, _, _ = detector.detectAndDecode(bgr)
+                    if data and data.strip():
+                        # Return pyzbar-compatible object mock
+                        class _R:
+                            def __init__(self, d): self.data = d.encode()
+                        return [_R(data)]
+                # Also try WeChatQRCode if available (better for dense QR)
+                try:
+                    wechat = cv2.wechat_qrcode_WeChatQRCode()
+                    for c in candidates:
+                        arr = np.array(c.convert("RGB"))
+                        bgr = arr[:, :, ::-1]
+                        texts, _ = wechat.detectAndDecode(bgr)
+                        for t in texts:
+                            if t and t.strip():
+                                class _R:
+                                    def __init__(self, d): self.data = d.encode()
+                                return [_R(t)]
+                except Exception:
+                    pass
+            except ImportError:
+                pass
+
+            # ── Fallback: pyzbar (needs libzbar system lib) ───────────────────
+            try:
+                from pyzbar.pyzbar import decode as pyzbar_decode
+                for c in candidates:
+                    res = pyzbar_decode(c)
+                    if res:
+                        return res
+            except Exception:
+                pass
+
+            return []
+
+        # ── Helper: extract all QR candidate sub-regions from image ──────────
+        def _get_scan_regions(img):
+            """Return list of PIL images: full + quadrant crops + centre crop."""
+            W, H = img.size
+            regions = [img]
+            # 4 quadrants
+            for left, upper, right, lower in [
+                (0,     0,     W//2, H//2),
+                (W//2,  0,     W,    H//2),
+                (0,     H//2,  W//2, H),
+                (W//2,  H//2,  W,    H),
+            ]:
+                regions.append(img.crop((left, upper, right, lower)))
+            # Centre 60%
+            margin_x, margin_y = int(W * 0.2), int(H * 0.2)
+            regions.append(img.crop((margin_x, margin_y, W - margin_x, H - margin_y)))
+            # Bottom-centre (Google Auth QR is usually here in screenshots)
+            regions.append(img.crop((int(W*0.2), int(H*0.4), int(W*0.8), int(H*0.85))))
+            return regions
+
+        # ── Helper: parse a single scan result text ───────────────────────────
+        def _parse_result_text(text):
+            nonlocal secret, otpauth_uri
+            if "otpauth" in text.lower():
+                otpauth_uri = text
+                s = _extract_secret_from_uri(text)
+                if s:
+                    secret = s
+                return True
+            elif len(text) >= 16 and text.replace("=", "").replace(" ", "").isalnum():
+                secret = text.strip().upper().replace(" ", "")
+                return True
+            return False
+
+        from PIL import Image
+        img = Image.open(io.BytesIO(bytes(photo_bytes)))
+        regions = _get_scan_regions(img)
+
+        # ── Pass 1: pyzbar across all regions ────────────────────────────────
+        try:
+            for region in regions:
+                results = _pyzbar_scan(region)
+                for r in results:
+                    text = r.data.decode("utf-8", errors="ignore")
+                    if _parse_result_text(text):
+                        break
+                if secret or otpauth_uri:
+                    break
+        except Exception:
+            pass
+
+
+        if secret:
+            temp_data.setdefault(user.id, {})["twofa"] = secret
+            context.user_data["sell_state"] = STATE_CONFIRM
+            await update.message.reply_text(
+                f"✅ 2FA secret extracted from QR!\n\n🔑 Key: `{secret}`\n\n"
+                + _sell_confirmation_text(user.id),
+                parse_mode="Markdown",
+                reply_markup=_sell_after_2fa_kb()
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Could not read QR code. Please enter your 2FA key manually:",
+                reply_markup=_sell_cancel_kb()
+            )
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ QR scan error. Please enter your 2FA key manually:",
+            reply_markup=_sell_cancel_kb()
+        )
+
+def _sell_entry_kb():
+    return ReplyKeyboardMarkup([
+        ["❤️Single Gmail", "📋 Bulk submit"],
+        ["⊖ Cancel registration"],
+    ], resize_keyboard=True)
+
+def _sell_after_recovery_kb():
+    return ReplyKeyboardMarkup([
+        ["🔒 Add 2FA key"],
+        ["✓ Done (without 2FA)"],
+        ["⊖ Cancel registration"],
+    ], resize_keyboard=True)
+
+def _sell_after_2fa_kb():
+    """Keyboard shown AFTER user has already entered 2FA key."""
+    return ReplyKeyboardMarkup([
+        ["✅ Submit"],
+        ["🔒 Change 2FA key"],
+        ["⊖ Cancel registration"],
+    ], resize_keyboard=True)
+
+def _sell_submit_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ SUBMIT", callback_data="FINAL_SUBMIT")],
+    ])
+
+def _sell_confirmation_text(user_id: int) -> str:
+    d = temp_data.get(user_id, {})
+    email    = d.get("email", "—")
+    password = d.get("password", "—")
+    recovery = d.get("recovery_email", "—")
+    twofa    = d.get("twofa", "")
+    lines = [
+        "✅ Your account credentials have been saved",
+        "",
+        f"Email: {email}",
+        f"Password: {password}",
+        f"Recovery email: {recovery}",
+    ]
+    if twofa:
+        lines.append(f"2FA Key: {twofa}")
+    lines += [
+        "",
+        "🔒 Make sure your Gmail account exists and is accessible, otherwise the payment will not be processed.",
+        "",
+        "🔒 We suggest you set 2FA on the account to increase the chances of successful login on our side.",
+        "",
+        "You can submit your account with or without 2FA authentication key.",
+    ]
+    return "\n".join(lines)
+
+# =========================
+# REGISTER (SELL FLOW ENTRY)
+# =========================
+
+async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point when user taps Sell — ask single or bulk."""
+    user = update.effective_user
+    temp_data[user.id] = {}
+    context.user_data["sell_state"] = STATE_WAIT_ENTRY
+    context.user_data["reg_flow"] = True
+    await update.message.reply_text(
+        "Do you want to submit Single Gmail account or bulk submit?",
+        reply_markup=_sell_entry_kb(),
+    )
+
+# =========================
+# SELL FLOW — CANCEL HELPER
+# =========================
+
+async def _cancel_sell_flow(update, context):
+    user = update.effective_user
+    context.user_data.pop("sell_state", None)
+    context.user_data.pop("reg_flow", None)
+    temp_data.pop(user.id, None)
+    await update.message.reply_text(
+        "Registration cancelled.",
+        reply_markup=main_menu_markup(user.id),
+    )
+
+# =========================
+# SELL FLOW — BULK PARSER
+# =========================
+
+def _parse_bulk_accounts(text):
+    results = []
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = None
+        for sep in [":", ",", "	"]:
+            p = line.split(sep)
+            if len(p) >= 3:
+                parts = [x.strip() for x in p]
+                break
+        if not parts or len(parts) < 3:
+            continue
+        results.append({
+            "email": parts[0],
+            "password": parts[1],
+            "recovery_email": parts[2],
+            "twofa": parts[3] if len(parts) >= 4 else "",
+        })
+    return results
+
+# =========================
+# SELL FLOW — FINAL SUBMIT HELPER
+# =========================
+
+async def _do_final_submit(update, context, twofa=""):
+    user = update.effective_user
+    # Support both message-based and callback-query-based triggers
+    _reply_msg = update.message or (update.callback_query.message if update.callback_query else None)
+    d = temp_data.get(user.id, {})
+    email    = d.get("email", "").strip()
+    password = d.get("password", "").strip()
+    recovery = d.get("recovery_email", "").strip()
+    if not twofa:
+        twofa = d.get("twofa", "").strip()
+
+    if not email or not password or not recovery:
+        await _reply_msg.reply_text(
+            "Missing data. Please start registration again.",
+            reply_markup=main_menu_markup(user.id),
+        )
+        context.user_data.pop("sell_state", None)
+        context.user_data.pop("reg_flow", None)
+        temp_data.pop(user.id, None)
+        return
+
     now = int(time.time())
     con = db()
     cur = con.cursor()
-
-    cur.execute("""
-    INSERT INTO registrations(
-        user_id, first_name, last_name, email, password, recovery_email, created_at, state
-    ) VALUES(?,?,?,?,?,?,?,?)
-    """, (
-        user.id,
-        data["first_name"],
-        data["last_name"],
-        data["email"],
-        data["password"],
-        data["recovery_email"],
-        now,
-        "created",
-    ))
-    reg_id = cur.lastrowid
-
-    expires_at = now + ACTION_TIMEOUT_HOURS * 3600
-    cur.execute("""
-    INSERT INTO actions(
-        user_id, reg_id, created_at, expires_at, state
-    ) VALUES(?,?,?,?,?)
-    """, (
-        user.id,
-        reg_id,
-        now,
-        expires_at,
-        "shown",
-    ))
-    action_id = cur.lastrowid
-
-    con.commit()
+    try:
+        cur.execute(
+            "INSERT INTO registrations(user_id, email, password, recovery_email, twofa_key, created_at, state) VALUES(?,?,?,?,?,?,?)",
+            (user.id, email, password, recovery, twofa if twofa else None, now, "created")
+        )
+        reg_id = cur.lastrowid
+        expires_at = now + ACTION_TIMEOUT_HOURS * 3600
+        cur.execute(
+            "INSERT INTO actions(user_id, reg_id, created_at, expires_at, state) VALUES(?,?,?,?,?)",
+            (user.id, reg_id, now, expires_at, "waiting_admin")
+        )
+        action_id = cur.lastrowid
+        con.commit()
+    except Exception as _e:
+        try: con.rollback()
+        except Exception: pass
+        import traceback; traceback.print_exc()
+        print(f"[SELL SUBMIT ERROR] {_e!r}", flush=True)
+        con.close()
+        await _reply_msg.reply_text(f"DB error: {_e}", reply_markup=main_menu_markup(user.id))
+        return
     con.close()
 
-    await update.message.reply_text(
-        "Register account using the specified\n"
-        "data and get from ₹20 to ₹22\n\n"
-        f"Name: `{data['first_name']}`\n"
-        f"Last Name: `{data['last_name']}`\n"
-        f"Email: `{data['email']}`\n"
-        f"Password: `{data['password']}`\n\n"
-        "🔐 Be sure to use the specified data,\n"
-        "otherwise the account will not be paid,\n\n"
-        " =========================\n"
-        "Age choose : 1990-2007\n"
-         "========================\n"
-        "Gender : Your choice,\n",
-        parse_mode="Markdown",
-        reply_markup=reg_buttons(action_id),
+    try:
+        hid = add_hold_credit(user.id, float(PRE_CREDIT_AMOUNT))
+        con2 = db(); cur2 = con2.cursor()
+        cur2.execute(
+            "INSERT INTO precredits(action_id, user_id, hold_credit_id, amount, created_at, reverted) VALUES(?,?,?,?,?,0)",
+            (int(action_id), int(user.id), int(hid), float(PRE_CREDIT_AMOUNT), now)
+        )
+        con2.commit(); con2.close()
+    except Exception:
+        pass
+
+    try:
+        save_form_row(int(reg_id), int(user.id), "", email, password, recovery, now, twofa_key=twofa)
+    except Exception:
+        pass
+
+    if ENABLE_SMTP_BOUNCE_CHECK:
+        handle = (email.split("@")[0] if "@" in email else email).strip()
+        ok = await asyncio.to_thread(_email_handle_exists, handle)
+        if not ok:
+            set_reg_state(reg_id, "failed")
+            await _reply_msg.reply_text("Email verification failed. Please check your email.", reply_markup=main_menu_markup(user.id))
+            context.user_data.pop("sell_state", None)
+            context.user_data.pop("reg_flow", None)
+            temp_data.pop(user.id, None)
+            return
+
+    context.user_data.pop("sell_state", None)
+    context.user_data.pop("reg_flow", None)
+    temp_data.pop(user.id, None)
+
+    await _reply_msg.reply_text(
+        "🎉Submitted successfully!\n\n💸Rs." + str(int(PRE_CREDIT_AMOUNT)) + " credited to HOLD balance.\n🏆Funds will be transferred to main balance after review.",
+        reply_markup=main_menu_markup(user.id),
     )
+
+# =========================
+# SELL FLOW — TEXT INPUT HANDLER
+# Called from menu_handler when sell_state is active
+# =========================
+
+async def _handle_sell_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user = update.effective_user
+    state = context.user_data.get("sell_state")
+    if not state:
+        return False
+
+    txt = (update.message.text or "").strip()
+
+    if txt == "Cancel registration" or txt == "⊖ Cancel registration":
+        await _cancel_sell_flow(update, context)
+        return True
+
+    if state == STATE_WAIT_ENTRY:
+        if txt == "❤️Single Gmail" or "Single Gmail" in txt:
+            context.user_data["sell_state"] = STATE_WAIT_EMAIL
+            await update.message.reply_text("Please enter your Gmail email address:", reply_markup=_sell_cancel_kb())
+            return True
+        if txt == "Bulk submit" or "Bulk submit" in txt:
+            context.user_data["sell_state"] = STATE_WAIT_BULK
+            msg = (
+                "Bulk Account Submission\n\n"
+                "Paste your accounts or send a .txt file, one account per line:\n"
+                "email:password:recovery_email\n"
+                "email:password:recovery_email:2fa_key (optional)\n\n"
+                "Example:\n"
+                "john@gmail.com:MyPass123:recovery1@mail.com\n"
+                "jane@gmail.com:SecureP@ss:recovery2@mail.com:F7QZDZENI\n\n"
+                "You can also use comma or tab as separator."
+            )
+            await update.message.reply_text(msg, reply_markup=_sell_cancel_kb())
+            return True
+        await update.message.reply_text("Please choose an option:", reply_markup=_sell_entry_kb())
+        return True
+
+    if state == STATE_WAIT_BULK:
+        # .txt file support handled in document_handler; this handles pasted text
+        accounts = _parse_bulk_accounts(txt)
+        if not accounts:
+            await update.message.reply_text("Could not parse any accounts. Format: email:password:recovery", reply_markup=_sell_cancel_kb())
+            return True
+        # Max 50 accounts per submission
+        MAX_BULK = 50
+        if len(accounts) > MAX_BULK:
+            await update.message.reply_text(
+                f"❌ Maximum {MAX_BULK} accounts allowed per bulk submission. You sent {len(accounts)}. Please split into smaller batches.",
+                reply_markup=_sell_cancel_kb()
+            )
+            return True
+        now = int(time.time())
+        ok_count = 0
+        skip_count = 0
+        err_lines = []
+        for acc in accounts:
+            em = acc["email"].lower().strip()
+            pw = acc["password"].strip()
+            rv = acc["recovery_email"].lower().strip()
+            tf = acc.get("twofa", "").strip()
+            if not is_valid_email_syntax(em):
+                err_lines.append("Invalid email: " + em); skip_count += 1; continue
+            if not is_valid_email_syntax(rv):
+                err_lines.append("Invalid recovery: " + rv); skip_count += 1; continue
+            if em == rv:
+                err_lines.append("Email same as recovery: " + em); skip_count += 1; continue
+            if _email_exists_in_db(em):
+                err_lines.append("Already exists: " + em); skip_count += 1; continue
+            if _recovery_email_exists_in_db(rv):
+                err_lines.append("Recovery exists: " + rv); skip_count += 1; continue
+            try:
+                con = db(); cur = con.cursor()
+                cur.execute(
+                    "INSERT INTO registrations(user_id, email, password, recovery_email, twofa_key, created_at, state) VALUES(?,?,?,?,?,?,?)",
+                    (user.id, em, pw, rv, tf if tf else None, now, "created")
+                )
+                reg_id = cur.lastrowid
+                expires_at = now + ACTION_TIMEOUT_HOURS * 3600
+                cur.execute(
+                    "INSERT INTO actions(user_id, reg_id, created_at, expires_at, state) VALUES(?,?,?,?,?)",
+                    (user.id, reg_id, now, expires_at, "waiting_admin")
+                )
+                action_id = cur.lastrowid
+                con.commit(); con.close()
+                try:
+                    hid = add_hold_credit(user.id, float(PRE_CREDIT_AMOUNT))
+                    con2 = db(); cur2 = con2.cursor()
+                    cur2.execute(
+                        "INSERT INTO precredits(action_id, user_id, hold_credit_id, amount, created_at, reverted) VALUES(?,?,?,?,?,0)",
+                        (int(action_id), int(user.id), int(hid), float(PRE_CREDIT_AMOUNT), now)
+                    )
+                    con2.commit(); con2.close()
+                except Exception: pass
+                try: save_form_row(int(reg_id), int(user.id), "", em, pw, rv, now)
+                except Exception: pass
+                ok_count += 1
+            except Exception as be:
+                err_lines.append("DB error for " + em); skip_count += 1
+        msg = str(ok_count) + " account(s) submitted."
+        if skip_count:
+            msg += " " + str(skip_count) + " skipped."
+        if err_lines:
+            msg += "\n" + "\n".join(err_lines[:10])
+        context.user_data.pop("sell_state", None)
+        context.user_data.pop("reg_flow", None)
+        temp_data.pop(user.id, None)
+        await update.message.reply_text(msg, reply_markup=main_menu_markup(user.id))
+        return True
+
+    if state == STATE_WAIT_EMAIL:
+        email = txt.lower().strip()
+        if not is_valid_email_syntax(email):
+            await update.message.reply_text("Invalid email format. Please enter a valid Gmail address:", reply_markup=_sell_cancel_kb())
+            return True
+        if _email_exists_in_db(email):
+            await update.message.reply_text("This email already exists. Please enter a different email:", reply_markup=_sell_cancel_kb())
+            return True
+        temp_data.setdefault(user.id, {})["email"] = email
+        context.user_data["sell_state"] = STATE_WAIT_PASSWORD
+        await update.message.reply_text("Please enter your password:", reply_markup=_sell_cancel_kb())
+        return True
+
+    if state == STATE_WAIT_PASSWORD:
+        password = txt.strip()
+        if not password:
+            await update.message.reply_text("Password cannot be empty. Please enter your password:", reply_markup=_sell_cancel_kb())
+            return True
+        temp_data.setdefault(user.id, {})["password"] = password
+        context.user_data["sell_state"] = STATE_WAIT_RECOVERY
+        await update.message.reply_text("Please enter your recovery email address:", reply_markup=_sell_cancel_kb())
+        return True
+
+    if state == STATE_WAIT_RECOVERY:
+        recovery = txt.lower().strip()
+        if not is_valid_email_syntax(recovery):
+            await update.message.reply_text("Invalid recovery email format. Please enter a valid email:", reply_markup=_sell_cancel_kb())
+            return True
+        # Recovery email cannot be same as the main email
+        main_email = temp_data.get(user.id, {}).get("email", "").lower().strip()
+        if recovery == main_email:
+            await update.message.reply_text("❌ Recovery email cannot be the same as your main email. Please enter a different recovery email:", reply_markup=_sell_cancel_kb())
+            return True
+        if _recovery_email_exists_in_db(recovery):
+            await update.message.reply_text("This recovery email already exists. Please enter a different one:", reply_markup=_sell_cancel_kb())
+            return True
+        temp_data.setdefault(user.id, {})["recovery_email"] = recovery
+        temp_data[user.id]["twofa"] = ""
+        context.user_data["sell_state"] = STATE_CONFIRM
+        await update.message.reply_text("Checking if credentials are unique...")
+        await update.message.reply_text(_sell_confirmation_text(user.id), reply_markup=_sell_after_recovery_kb())
+        return True
+
+    if state == STATE_CONFIRM:
+        if "Done (without 2FA)" in txt or "without 2FA" in txt.lower():
+            await _do_final_submit(update, context, twofa="")
+            return True
+        if "Add 2FA" in txt or "2FA key" in txt.lower() or "Change 2FA" in txt.lower():
+            context.user_data["sell_state"] = STATE_WAIT_2FA
+            await update.message.reply_text("Please enter your 2FA authentication key: or QR:", reply_markup=_sell_cancel_kb())
+            return True
+        if "✅ Submit" in txt or "submit" in txt.lower():
+            await _do_final_submit(update, context)
+            return True
+        return True
+
+    if state == STATE_WAIT_2FA:
+        twofa = txt.strip()
+        if not twofa:
+            await update.message.reply_text("2FA key cannot be empty. Please enter your 2FA key:", reply_markup=_sell_cancel_kb())
+            return True
+        temp_data.setdefault(user.id, {})["twofa"] = twofa
+        context.user_data["sell_state"] = STATE_CONFIRM
+        # Show confirmation text + inline Submit button + reply keyboard with change option
+        await update.message.reply_text(
+            "✅ 2FA key saved! Tap SUBMIT below to confirm:",
+            reply_markup=_sell_after_2fa_kb()
+        )
+        return True
+
+    return False
 # =========================
 # CALLBACKS
 # =========================
 def _admin_ev_set_verified(cur, action_id: int, admin_id: int):
-    # Mark approved
-    set_action_state_cur(cur, int(action_id), "approved")
-
-    cur.execute("SELECT reg_id, user_id FROM actions WHERE action_id=?", (int(action_id),))
-    a = cur.fetchone()
-    if a:
-        set_reg_state_cur(cur, int(a["reg_id"]), "approved")
-
-        # Task rewards
-        cur.execute(
-            "SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state='approved'",
-            (int(a["user_id"]),),
-        )
-        approved_count = int(cur.fetchone()["c"])
-        apply_task_rewards(cur, int(a["user_id"]), approved_count)
-
-        # Referral bonus: har approval pe commission milti hai referrer ko
-        cur.execute("SELECT referrer_id FROM users WHERE user_id=?", (int(a["user_id"]),))
-        ur = cur.fetchone()
-        ref_id = ur["referrer_id"] if ur else None
-        if ref_id:
-            # Dynamic commission rate from admin settings
-            commission_pct = get_referral_commission_pct()
-            commission_amt = round(float(PRE_CREDIT_AMOUNT) * commission_pct / 100.0, 2)
-            if commission_amt > 0:
-                # Check if bonus already paid for THIS specific registration (reg_id)
-                reg_id_for_ref = int(a["reg_id"])
-                cur.execute(
-                    "SELECT 1 FROM referral_bonuses WHERE referrer_id=? AND referred_user_id=? AND reg_id=?",
-                    (int(ref_id), int(a["user_id"]), reg_id_for_ref),
-                )
-                already = cur.fetchone()
-                if not already:
-                    cur.execute(
-                        "INSERT INTO referral_bonuses(referrer_id, referred_user_id, amount, created_at, reg_id) VALUES(?,?,?,?,?)",
-                        (int(ref_id), int(a["user_id"]), commission_amt, int(time.time()), reg_id_for_ref),
-                    )
-                    cur.execute(
-                        "UPDATE users SET main_balance=main_balance+? WHERE user_id=?",
-                        (commission_amt, int(ref_id)),
-                    )
-                    add_ledger_entry_cur(cur, int(ref_id), delta_main=commission_amt, reason=f"Referral bonus ({commission_pct:.1f}%)")
-
-    # Save decision
+    # Save decision only — state change sweeper handle karega hold mature hone par
     cur.execute(
         "INSERT OR REPLACE INTO admin_email_verify(action_id, decided_by, status, reason, decided_at) VALUES(?,?,?,?,?)",
         (int(action_id), int(admin_id), "VERIFIED", "", int(time.time())),
@@ -3783,24 +4367,8 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         dprint(f"[CB ERROR] ensure_user crashed: {e}", flush=True)
 
-    try:
-        moved = move_matured_hold_to_main(user.id)
-    except Exception as e:
-        dprint(f"[CB ERROR] move_matured_hold crashed: {e}", flush=True)
-        moved = 0
-
     data = q.data or ""
     dprint(f"[CB] user={user.id} data={data}", flush=True)
-
-    # ── Maintenance toggle ───────────────────────────────────────────
-    if data == "MAINT_TOGGLE":
-        if not is_admin(user.id):
-            return
-        current = is_maintenance_mode()
-        set_admin_setting("maintenance", "0" if current else "1")
-        status = "OFF 🟢" if current else "ON 🔴"
-        await q.edit_message_text(f"🔧 Maintenance Mode is now: {status}")
-        return
 
     # ── Pending queue skip ───────────────────────────────────────────
     if data.startswith("ADM_QUEUE_SKIP:"):
@@ -3826,6 +4394,38 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         return
+
+    # ── Reward toggle callbacks ──────────────────────────────────────
+    if data in ("TASK_ON", "TASK_OFF", "REF_ON", "REF_OFF"):
+        if not is_admin(user.id):
+            return
+        if data == "TASK_ON":
+            set_setting("task_rewards", "on")
+            msg = "✅ Task Rewards turned ON"
+        elif data == "TASK_OFF":
+            set_setting("task_rewards", "off")
+            msg = "❌ Task Rewards turned OFF"
+        elif data == "REF_ON":
+            set_setting("referral_rewards", "on")
+            msg = "✅ Referral Rewards turned ON"
+        else:
+            set_setting("referral_rewards", "off")
+            msg = "❌ Referral Rewards turned OFF"
+        task_st = get_setting("task_rewards", "on")
+        ref_st  = get_setting("referral_rewards", "on")
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"TASK REWARD {'✅ ON' if task_st=='on' else '❌ OFF'}", callback_data="TASK_ON" if task_st!="on" else "TASK_OFF")],
+            [InlineKeyboardButton(f"REFERRAL {'✅ ON' if ref_st=='on' else '❌ OFF'}", callback_data="REF_ON" if ref_st!="on" else "REF_OFF")],
+        ])
+        try:
+            await q.edit_message_text(
+                f"{msg}\n\nTask Rewards: {'ON ✅' if task_st=='on' else 'OFF ❌'}\n"
+                f"Referral Rewards: {'ON ✅' if ref_st=='on' else 'OFF ❌'}",
+                reply_markup=kb,
+            )
+        except Exception:
+            await q.answer(msg, show_alert=True)
+        return
     
     if data == "PROFILE_BACK":
         # Hide profile message and show main menu
@@ -3841,12 +4441,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         return
-
-    if moved > 0:
-        try:
-            await context.bot.send_message(chat_id=user.id, text=tr(user.id, "funds_accrual"))
-        except Exception:
-            pass
 
     # Help menu (9 buttons)
     if data == "HELP_BACK":
@@ -3881,6 +4475,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+        cache_invalidate_channel(user.id)  # Force fresh Telegram API check on join button
         ok = await user_in_required_channels(context, user.id)
 
         if not ok:
@@ -3930,7 +4525,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "VID_RECOVERY":
         # Recovery email tutorial — replace VIDEO_FILE_ID_RECOVERY with your actual file_id
-        VIDEO_FILE_ID_RECOVERY = "YOUR_RECOVERY_VIDEO_FILE_ID_HERE"
+        VIDEO_FILE_ID_RECOVERY = "BAACAgUAAxkBAAMpabgZhlyMgIysil7vxDtqo-RgdEkAAnMeAAJYKsFV6nSr2mV4xW46BA"
         try:
             await context.bot.send_video(chat_id=user.id, video=VIDEO_FILE_ID_RECOVERY, caption="📕 How to add recovery email")
         except Exception:
@@ -4048,7 +4643,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # B) Accounts pagination
     if data.startswith("ACC:"):
         offset = int(data.split(":")[1])
-        _ALL_STATES = "('shown','done1','waiting_admin','approved','rejected','canceled','canceled_prompt','timeout')"
+        _ALL_STATES = "('waiting_admin','approved','rejected')"
 
         con = db()
         cur = con.cursor()
@@ -4077,12 +4672,16 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     a.action_id AS action_id,
                     a.state AS astate,
                     COALESCE(a.updated_at, a.created_at) AS stime,
+                    a.created_at AS sub_ts,
                     ev.status AS ev_status,
                     ev.reason AS ev_reason,
-                    r.state AS rstate
+                    r.state AS rstate,
+                    hc.matured_at AS matured_at
                 FROM actions a
                 JOIN registrations r ON r.id = a.reg_id
                 LEFT JOIN admin_email_verify ev ON ev.action_id = a.action_id
+                LEFT JOIN precredits pc ON pc.action_id = a.action_id
+                LEFT JOIN hold_credits hc ON hc.id = pc.hold_credit_id
                 WHERE a.user_id = ? AND a.state IN {_ALL_STATES}
                 ORDER BY COALESCE(a.updated_at, a.created_at) DESC
                 LIMIT 5 OFFSET ?
@@ -4267,18 +4866,18 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             base_text = (
                 "Register account using the specified\n"
-                "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{first_name}`\n"
+                "data and get from ₹10 to ₹12\n\n"
+                f"First Name: `{first_name}`\n"
                 f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n\n"
                 "🔐 Be sure to use the specified data,\n"
                 "otherwise the account will not be paid\n"
-                "=========================\n"
-                "Age choose : 1990-2007\n"
-                "=========================\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Age choose : 1990-2005\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
                 "Gender : Your choice,\n"
-                "=========================\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
                 "CANCELED REGISTRATION"
             )
 
@@ -4329,16 +4928,16 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             base_text = (
                 "Register account using the specified\n"
-                "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{first_name}`\n"
+                "data and get from ₹10 to ₹12\n\n"
+                f"First Name: `{first_name}`\n"
                 f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n\n"
                 "🔐 Be sure to use the specified data,\n"
                 "otherwise the account will not be paid\n"
-                "=========================\n"
-                "Age choose : 1990-2007\n"
-                "=========================\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Age choose : 1990-2005\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
                 "Gender : Your choice\n"
 
             )
@@ -4373,18 +4972,18 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             base_text = (
                 "Register account using the specified\n"
-                "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{first_name}`\n"
+                "data and get from ₹10 to ₹12\n\n"
+                f"First Name: `{first_name}`\n"
                 f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n\n"
                 "🔐 Be sure to use the specified data,\n"
                 "otherwise the account will not be paid\n"
-                "=========================\n"
-                "Age choose : 1990-2007\n"
-                "=========================\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Age choose : 1990-2005\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
                 "Gender : Your choice\n"
-                "________________________\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
                 "🚦 You need to add Recovery email :\n"
                 f"`{recovery_email}`\n"
             )
@@ -4418,16 +5017,16 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             base_text = (
                 "Register account using the specified\n"
-                "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{first_name}`\n"
+                "data and get from ₹10 to ₹12\n\n"
+                f"First Name: `{first_name}`\n"
                 f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n\n"
                 "🔐 Be sure to use the specified data,\n"
                 "otherwise the account will not be paid\n"
-                "=========================\n"
-                "Age choose : 1990-2007\n"
-                "=========================\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Age choose : 1990-2005\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
                 "Gender : Your choice\n"
             )
             try:
@@ -4460,18 +5059,18 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             base_text = (
                 "Register account using the specified\n"
-                "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{first_name}`\n"
+                "data and get from ₹10 to ₹12\n\n"
+                f"First Name: `{first_name}`\n"
                 f"Last Name: `{last_name}`\n"
                 f"Email: `{email}`\n"
                 f"Password: `{password}`\n\n"
                 "🔐 Be sure to use the specified data,\n"
                 "otherwise the account will not be paid\n"
-                "=========================\n"
-                "Age choose : 1990-2007\n"
-                "=========================\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Age choose : 1990-2005\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
                 "Gender : Your choice\n"
-                "=========================\n\n"
+                
                 
             )
             try:
@@ -4537,7 +5136,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             context.bot,    
                             chat_id,    
                             confirm_msg_id,    
-                            f"ERROR"    
+                            f"l⚠️ Please add a recovery email ."    
                         )    
                     except Exception:    
                         pass    
@@ -4572,7 +5171,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         context.bot,
                         chat_id,
                         confirm_msg_id,
-                        tr(user.id, "l⚠️ Please add a recovery email in {handle}@gmail.com")
+                        tr(user.id, "l⚠️ Please add a recovery email.")
                     )
                 except Exception:
                     pass
@@ -4596,21 +5195,63 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cur_pc = con_pc.cursor()
                 cur_pc.execute("SELECT hold_credit_id, amount, reverted FROM precredits WHERE action_id=?", (int(action_id),))
                 pc = cur_pc.fetchone()
+                _mature_delay = None
                 if not pc:
-                    hid = add_hold_credit_cur(cur_pc, int(user.id), float(PRE_CREDIT_AMOUNT))
+                    hid, _mature_at = add_hold_credit_cur(cur_pc, int(user.id), float(PRE_CREDIT_AMOUNT))
+                    _mature_delay = max(1, _mature_at - int(time.time()))
                     cur_pc.execute(
                         "INSERT INTO precredits(action_id, user_id, hold_credit_id, amount, created_at, reverted) VALUES(?,?,?,?,?,0)",
                         (int(action_id), int(user.id), int(hid), float(PRE_CREDIT_AMOUNT), int(time.time())),
                     )
                 elif int(pc["reverted"] or 0) == 1:
                     # was reverted earlier; re-credit on new RIGHT result
-                    hid = add_hold_credit_cur(cur_pc, int(user.id), float(pc["amount"]))
+                    hid, _mature_at = add_hold_credit_cur(cur_pc, int(user.id), float(pc["amount"]))
+                    _mature_delay = max(1, _mature_at - int(time.time()))
                     cur_pc.execute(
                         "UPDATE precredits SET hold_credit_id=?, reverted=0 WHERE action_id=?",
                         (int(hid), int(action_id)),
                     )
                 con_pc.commit()
                 con_pc.close()
+                # Exact time pe instant trigger schedule karo — sweeper pe depend nahi
+                if _mature_delay is not None:
+                    _uid_for_trigger = int(user.id)
+                    async def _trigger_on_mature(ctx, _uid=_uid_for_trigger):
+                        try:
+                            def _do():
+                                from db_pg import db as _db
+                                return move_matured_hold_to_main(_uid)
+                            result = await asyncio.to_thread(_do)
+                            amt, task_paid, ref_id, commission_amt = result
+                            if float(amt) > 0:
+                                _commission_pct = get_referral_commission_pct()
+                                _per = round(float(PRE_CREDIT_AMOUNT) * _commission_pct / 100.0, 2)
+                                try:
+                                    await ctx.bot.send_message(
+                                        chat_id=_uid,
+                                        text=f"{tr(_uid, 'accepted')}\n\n{tr(_uid, 'funds_accrual')}"
+                                    )
+                                except Exception:
+                                    pass
+                                if task_paid > 0:
+                                    try:
+                                        await ctx.bot.send_message(
+                                            chat_id=_uid,
+                                            text=f"✅ Task reward: ₹{task_paid:.2f} added to your main balance!"
+                                        )
+                                    except Exception:
+                                        pass
+                                if ref_id and commission_amt > 0:
+                                    try:
+                                        await ctx.bot.send_message(
+                                            chat_id=int(ref_id),
+                                            text=f"💸 Referral commission ₹{commission_amt:.2f} credited!"
+                                        )
+                                    except Exception:
+                                        pass
+                        except Exception as _e:
+                            dprint(f"[INSTANT_TRIGGER] error for uid={_uid_for_trigger}: {_e!r}")
+                    context.job_queue.run_once(_trigger_on_mature, when=_mature_delay, name=f"hold_mature_{user.id}_{action_id}")
             except Exception:
                 try:
                     con_pc.close()
@@ -4668,23 +5309,29 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             
             base_text = (
-                "Register account using the specified\n"
-                "data and get from ₹20 to ₹22\n\n"
-                f"Name: `{first_name}`\n"
-                f"Last Name: `{last_name}`\n"
-                f"Email: `{email}`\n"
-                f"Password: `{password}`\n\n"
-                "🔐 Be sure to use the specified data,\n"
-                "otherwise the account will not be paid\n"
-                "=========================\n"
-                "Age choose : 1990-2007\n"
-                "=========================\n"
-                "Gender : Your choice\n"
-                "________________________\n"
-                "🚦 You need to add Recovery email :\n"
-                f"`{recovery_email}`\n"                
-            ) 
-            
+    "Register account using the specified data "
+    "and get from ₹10 to ₹12\n\n"
+
+    f"First name: `{first_name}`\n"
+    f"Last name: `{last_name}`\n"
+    f"Email: `{email}`\n"
+    f"Password: `{password}`\n\n"
+
+    "🔐 Be sure to use the specified data, "
+    "otherwise the account will not be paid.\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    "🚦 You need to add Recovery email\n"
+    f"`{recovery_email}`\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    "₹ 10 credited to hold\n\n"
+
+    "Funds will be transferred to the main balance "
+    "after 1-day hold.\n\n"
+
+    "📛 Be sure to LOG OUT of account on your device"
+)
 
             kb = InlineKeyboardMarkup([[
                 InlineKeyboardButton("📲 How to logout of account ?", callback_data="VID_LOGOUT")
@@ -4702,6 +5349,18 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_logout_video(context, user.id)
             return
 
+    # =========================
+    # SELL FLOW INLINE CALLBACKS
+    # =========================
+
+    if data in ("NO_2FA", "WITH_2FA", "CONFIRM_2FA"):
+        await q.answer()
+        return
+
+    if data == "FINAL_SUBMIT":
+        await q.answer()
+        await _do_final_submit(update, context)
+        return
     # =========================
     # ADMIN: Manual email decision (💎 EMAIL)
     # =========================
@@ -4732,133 +5391,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(f"❌ Rejected with reason: {reason}", reply_markup=None)
         return
 
-    # =========================
-    # ADMIN: Registration Accept/Reject
-    # =========================
-    if data.startswith("ADM_REG_ACCEPT:") or data.startswith("ADM_REG_REJECT:"):
-        if not is_admin(user.id):
-            return
-
-        action_id = int(data.split(":")[1])
-        con = db()
-        cur = con.cursor()
-        cur.execute("SELECT * FROM actions WHERE action_id=?", (action_id,))
-        a = cur.fetchone()
-        if not a:
-            con.close()
-            await q.message.reply_text("Not found.")
-            return
-
-        cur.execute("SELECT * FROM registrations WHERE id=?", (a["reg_id"],))
-        r = cur.fetchone()
-
-        if data.startswith("ADM_REG_ACCEPT:"):
-            # HOLD already credited at user-confirm time (provisional).
-            # If, for some reason, it was not credited, credit it now.
-            cur.execute("SELECT hold_credit_id, amount, reverted FROM precredits WHERE action_id=?", (action_id,))
-            pc = cur.fetchone()
-            if not pc:
-                hid = add_hold_credit_cur(cur, int(a["user_id"]), float(PRE_CREDIT_AMOUNT))
-                cur.execute(
-                    "INSERT INTO precredits(action_id, user_id, hold_credit_id, amount, created_at, reverted) VALUES(?,?,?,?,?,0)",
-                    (action_id, a["user_id"], hid, float(PRE_CREDIT_AMOUNT), int(time.time())),
-                )
-            elif int(pc["reverted"]) == 1:
-                # was reverted earlier; re-credit on accept
-                hid = add_hold_credit_cur(cur, int(a["user_id"]), float(pc["amount"]))
-                cur.execute(
-                    "UPDATE precredits SET hold_credit_id=?, reverted=0 WHERE action_id=?",
-                    (hid, action_id),
-                )
-
-            set_action_state_cur(cur, action_id, "approved")
-            set_reg_state_cur(cur, a["reg_id"], "approved")
-
-            # Task rewards: pay milestones based on approved registrations count
-            cur.execute("SELECT COUNT(*) AS c FROM registrations WHERE user_id=? AND state=\'approved\'", (a["user_id"],))
-            approved_count = int(cur.fetchone()["c"])
-            paid_task = apply_task_rewards(cur, a["user_id"], approved_count)
-
-            # ── Referral Commission: har approval pe % milta hai referrer ko ──
-            commission_ref_id = None
-            commission_amt = 0.0
-            cur.execute("SELECT referrer_id FROM users WHERE user_id=?", (a["user_id"],))
-            ur = cur.fetchone()
-            ref_id = ur["referrer_id"] if ur else None
-
-            if ref_id:
-                commission_pct = get_referral_commission_pct()
-                if commission_pct > 0:
-                    commission_amt = round(float(PRE_CREDIT_AMOUNT) * commission_pct / 100.0, 2)
-                    if commission_amt > 0:
-                        # Dedup: ek reg_id ke liye sirf ek baar bonus milega
-                        reg_id_for_ref = int(a["reg_id"])
-                        cur.execute(
-                            "SELECT 1 FROM referral_bonuses WHERE referrer_id=? AND referred_user_id=? AND reg_id=?",
-                            (int(ref_id), int(a["user_id"]), reg_id_for_ref),
-                        )
-                        if not cur.fetchone():
-                            cur.execute(
-                                "INSERT INTO referral_bonuses(referrer_id, referred_user_id, amount, created_at, reg_id) VALUES(?,?,?,?,?)",
-                                (int(ref_id), int(a["user_id"]), float(commission_amt), int(time.time()), reg_id_for_ref),
-                            )
-                            cur.execute(
-                                "UPDATE users SET main_balance = main_balance + ? WHERE user_id=?",
-                                (float(commission_amt), int(ref_id)),
-                            )
-                            add_ledger_entry_cur(
-                                cur, int(ref_id),
-                                delta_main=float(commission_amt),
-                                reason=f"Referral commission {commission_pct:.1f}% on approval",
-                            )
-                            commission_ref_id = int(ref_id)
-
-            # Notify user about newly credited task rewards
-            if paid_task > 0:
-                try:
-                    await context.bot.send_message(chat_id=a["user_id"], text=f"🎁 Task reward added to MAIN: ₹{int(paid_task)}")
-                except Exception:
-                    pass
-
-            con.commit()
-            con.close()
-
-            # Commission notification to referrer
-            if commission_ref_id and commission_amt > 0:
-                try:
-                    commission_pct = get_referral_commission_pct()
-                    await context.bot.send_message(
-                        chat_id=commission_ref_id,
-                        text=(
-                            f"💸 Commission Earned!\n\n"
-                            f"Tumhara referral ka account approve hua.\n"
-                            f"Commission ({commission_pct:.1f}%): +₹{commission_amt:.2f} credited to your Main Balance! 🎉"
-                        ),
-                    )
-                except Exception:
-                    pass
-            await context.bot.send_message(chat_id=a["user_id"], text="✅ Admin accepted your registration. HOLD BALANCE updated.")
-            await context.bot.send_message(chat_id=a["user_id"], text="💡 Tip: Please LOG OUT of the account on your device and wait for HOLD to mature into MAIN.")
-        else:
-            # Revert provisional HOLD credit (if it was added on confirm)
-            cur.execute("SELECT hold_credit_id, amount, reverted FROM precredits WHERE action_id=?", (action_id,))
-            pc = cur.fetchone()
-            if pc and int(pc["reverted"] or 0) == 0:
-                try:
-                    revert_hold_credit_cur(cur, int(pc["hold_credit_id"]), int(a["user_id"]), float(pc["amount"]))
-                except Exception:
-                    pass
-                cur.execute("UPDATE precredits SET reverted=1 WHERE action_id=?", (action_id,))
-
-            set_action_state_cur(cur, action_id, "rejected")
-            set_reg_state_cur(cur, a["reg_id"], "rejected")
-            con.commit()
-            con.close()
-
-            await q.edit_message_text("❌ Rejected.")
-            await context.bot.send_message(chat_id=a["user_id"], text="❌ Admin rejected your registration.")
-            await context.bot.send_message(chat_id=a["user_id"], text="💡 Tip: Check EMAIL/PASSWORD and try again with correct details.")
-            return
 
     # =========================
     # ADMIN: Payout Accept/Reject (from panel list)
@@ -4907,12 +5439,6 @@ async def upi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ensure_user(user.id, user.username or user.full_name)
-    moved = move_matured_hold_to_main(user.id)
-    if moved > 0:
-        try:
-            await context.bot.send_message(chat_id=user.id, text=tr(user.id, "funds_accrual"))
-        except Exception:
-            pass
 
     # =========================
     # CRYPTO FLOW (USDT BEP-20)
@@ -4924,6 +5450,7 @@ async def upi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["await_crypto_amt"] = False
             context.user_data["crypto_addr"] = ""
             context.user_data["payout_reply_mode"] = "menu"
+            context.user_data["payout_type_select"] = True
             await update.message.reply_text(tr(user.id, "choose_withdrawal"), reply_markup=payout_menu_kb(user.id))
             return
 
@@ -5028,6 +5555,7 @@ async def upi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pid = cur.lastrowid
         con.commit()
         con.close()
+        cache_invalidate_balance(user.id)  # Balance change hua — cache clear
 
         # ✅ AUTO-ACCEPT: notify admin + keep it in PROCESSING
         try:
@@ -5138,6 +5666,7 @@ async def upi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pid = cur.lastrowid
     con.commit()
     con.close()
+    cache_invalidate_balance(user.id)  # Balance change hua — cache clear
 
     # Reset UPI flow ONLY after success
     context.user_data["await_upi"] = False
@@ -5187,9 +5716,8 @@ ADMIN_MENU_KB = ReplyKeyboardMarkup(
         ["🎭ALL USER", "ADD OR DEDUCT BALANCE ♎"],
         ["💎 EMAIL", "🤖 Auto Reply"],
         ["📊 Bot Stats", "🔍 Search Email"],
-        ["🔧 Maintenance Mode", "📢 Set Announcement"],
-        ["💰 Payout Limits", "📋 Pending Queue"],
         ["📣 Broadcast + Button"],
+        ["⚙️ Reward Settings"],
         ["🔙 Back"],
     ],
     resize_keyboard=True
@@ -5327,7 +5855,7 @@ def admin_top_users(period: str = "daily", limit: int = 50):
         FROM actions a
         LEFT JOIN users u ON u.user_id = a.user_id
         WHERE a.created_at >= ? AND a.state IN ('waiting_admin','approved','rejected')
-        GROUP BY a.user_id
+        GROUP BY a.user_id, u.username
         ORDER BY c DESC
         LIMIT ?
         """,
@@ -5358,10 +5886,14 @@ async def _send_admin_users_page(update_or_q, context, offset: int, total: int):
     page = offset // PAGE + 1
     total_pages = max(1, (total + PAGE - 1) // PAGE)
 
+    import re
+    def _esc(text: str) -> str:
+        return re.sub(r'([_*`\[\]])', r'\\\1', str(text))
+
     lines = [f"🎭 ALL USER — Page {page}/{total_pages} (Total: {total})",
              "Type username/userid to search 🔍", ""]
     for i, r in enumerate(rows, start=offset + 1):
-        uname = (r["username"] or "").strip() or "-"
+        uname = _esc((r["username"] or "").strip() or "-")
         lines.append(f"{i}. `{r['user_id']}` | {uname} | ₹{float(r['main_balance']):.0f} / ₹{float(r['hold_balance']):.0f}")
 
     msg = "\n".join(lines)
@@ -5527,7 +6059,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # ── NEW: Bot Stats ──────────────────────────────────────────────
     if txt == "📊 Bot Stats":
         try:
-            stats_text = admin_bot_stats()
+            stats_text = await asyncio.to_thread(admin_bot_stats)
             await update.message.reply_text(stats_text, parse_mode="Markdown", reply_markup=ADMIN_MENU_KB)
         except Exception as e:
             await update.message.reply_text(f"❌ Stats error: {e}", reply_markup=ADMIN_MENU_KB)
@@ -5602,36 +6134,6 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         return
 
-    if txt == "✅ Pending Confirmations":
-        con = db()
-        cur = con.cursor()
-        cur.execute("""
-            SELECT a.action_id, a.user_id, r.email, r.first_name, r.password, r.created_at
-            FROM actions a
-            JOIN registrations r ON r.id=a.reg_id
-            WHERE a.state='waiting_admin'
-            ORDER BY a.action_id DESC LIMIT 5
-        """)
-        rows = cur.fetchall()
-        if not rows:
-            await update.message.reply_text("No pending confirmations.")
-            return
-        for x in rows:
-            kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ ACCEPT", callback_data=f"ADM_REG_ACCEPT:{x['action_id']}"),
-                InlineKeyboardButton("❌ REJECT", callback_data=f"ADM_REG_REJECT:{x['action_id']}")
-            ]])
-            await update.message.reply_text(
-                f"Pending Confirmation (action {x['action_id']})\n"
-                f"User: {x['user_id']}\n"
-                f"FIRST NAME: {x['first_name']}\n"
-                f"EMAIL: {x['email']}\n"
-                f"PASSWORD: {x['password']}\n"
-                f"Created: {fmt_ts(x['created_at'])}",
-                reply_markup=kb
-            )
-        return
-
     # ── NEW: Block user with reason ─────────────────────────────────
     if txt == "⛔ Block User":
         context.user_data["admin_mode"] = "block_wait"
@@ -5646,90 +6148,36 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Send USER ID to UNBLOCK:", reply_markup=ADMIN_MENU_KB)
         return
 
-    # ── NEW: Maintenance Mode ────────────────────────────────────────
-    if txt == "🔧 Maintenance Mode":
-        current = is_maintenance_mode()
-        status = "ON 🔴" if current else "OFF 🟢"
-        toggle = "OFF" if current else "ON"
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton(f"Turn {toggle}", callback_data=f"MAINT_TOGGLE")
-        ]])
-        await update.message.reply_text(
-            f"🔧 Maintenance Mode: {status}\n\nUsers see: 'Bot is under maintenance' when ON.",
-            reply_markup=kb
-        )
-        return
-
-    # ── NEW: Announcement Banner ─────────────────────────────────────
-    if txt == "📢 Set Announcement":
-        current_ann = get_announcement()
-        context.user_data["admin_mode"] = "set_announcement"
-        await update.message.reply_text(
-            f"📢 Current announcement:\n`{current_ann or '(none)'}`\n\n"
-            "Send new announcement text (or send `clear` to remove):",
-            parse_mode="Markdown", reply_markup=ADMIN_MENU_KB
-        )
-        return
-
-    # ── NEW: Payout Limits ───────────────────────────────────────────
-    if txt == "💰 Payout Limits":
-        mn, mx = get_payout_limits()
-        context.user_data["admin_mode"] = "set_payout_limits"
-        await update.message.reply_text(
-            f"💰 Current Payout Limits:\nMin: ₹{mn}  |  Max: ₹{mx}\n\n"
-            "Send new limits as: `min max`\nExample: `55 2000`",
-            parse_mode="Markdown", reply_markup=ADMIN_MENU_KB
-        )
-        return
-
-    # ── NEW: Pending Queue ───────────────────────────────────────────
-    if txt == "📋 Pending Queue":
-        con = db()
-        cur = con.cursor()
-        cur.execute("""
-            SELECT a.action_id, a.user_id, r.email, r.first_name, r.password, r.recovery_email, a.created_at
-            FROM actions a
-            JOIN registrations r ON r.id = a.reg_id
-            WHERE a.state = 'waiting_admin'
-            ORDER BY a.action_id ASC
-            LIMIT 1
-        """)
-        row = cur.fetchone()
-        cur.execute("SELECT COUNT(*) AS c FROM actions WHERE state='waiting_admin'")
-        total_pending = int(cur.fetchone()["c"] or 0)
-        con.close()
-
-        if not row:
-            await update.message.reply_text("✅ No pending registrations in queue.", reply_markup=ADMIN_MENU_KB)
-            return
-
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ APPROVE", callback_data=f"ADM_EV_VERIFIED:{row['action_id']}"),
-                InlineKeyboardButton("❌ REJECT", callback_data=f"ADM_EV_REJECT:{row['action_id']}"),
-            ],
-            [InlineKeyboardButton("⏭ Skip", callback_data=f"ADM_QUEUE_SKIP:{row['action_id']}")]
-        ])
-        await update.message.reply_text(
-            f"📋 PENDING QUEUE — {total_pending} remaining\n\n"
-            f"Action ID: {row['action_id']}\n"
-            f"User ID: {row['user_id']}\n"
-            f"Name: {row['first_name'] or '-'}\n"
-            f"Email: `{row['email']}`\n"
-            f"Password: `{row['password']}`\n"
-            f"Recovery: `{row['recovery_email'] or '-'}`\n"
-            f"Submitted: {fmt_ts(int(row['created_at'] or 0))}",
-            parse_mode="Markdown",
-            reply_markup=kb
-        )
-        return
-
     # ── NEW: Broadcast + Button ──────────────────────────────────────
     if txt == "📣 Broadcast + Button":
         context.user_data["admin_mode"] = "bc_btn_text"
         await update.message.reply_text(
             "📣 Broadcast with Button\n\nStep 1: Send the message text:",
             reply_markup=ADMIN_MENU_KB
+        )
+        return
+
+    if txt == "⚙️ Reward Settings":
+        task_st  = get_setting("task_rewards", "on")
+        ref_st   = get_setting("referral_rewards", "on")
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"TASK REWARD {'✅ ON' if task_st=='on' else '❌ OFF'}", callback_data="TASK_ON" if task_st!="on" else "TASK_OFF")],
+            [InlineKeyboardButton(f"REFERRAL {'✅ ON' if ref_st=='on' else '❌ OFF'}", callback_data="REF_ON" if ref_st!="on" else "REF_OFF")],
+        ])
+        await update.message.reply_text(
+            f"⚙️ Reward Settings\n\nTask Rewards: {'ON ✅' if task_st=='on' else 'OFF ❌'}\n"
+            f"Referral Rewards: {'ON ✅' if ref_st=='on' else 'OFF ❌'}\n\n"
+            "Press button to toggle:",
+            reply_markup=kb,
+        )
+        return
+
+    # ── FIX: Admin Back → Main Menu ──────────────────────────────────────────
+    if txt == "🔙 Back":
+        context.user_data.pop("admin_mode", None)
+        await update.message.reply_text(
+            tr(user.id, "welcome_menu"),
+            reply_markup=main_menu_markup(user.id)
         )
         return
 
@@ -5748,35 +6196,6 @@ async def admin_content_handler(update: Update, context: ContextTypes.DEFAULT_TY
             return
     except Exception:
         pass
-
-    # ── Announcement set ────────────────────────────────────────────
-    if mode == "set_announcement":
-        raw = (update.message.text or "").strip()
-        context.user_data["admin_mode"] = None
-        if raw.lower() == "clear":
-            set_admin_setting("announcement", "")
-            await update.message.reply_text("✅ Announcement cleared.", reply_markup=ADMIN_MENU_KB)
-        else:
-            set_admin_setting("announcement", raw)
-            await update.message.reply_text(f"✅ Announcement set:\n📢 {raw}", reply_markup=ADMIN_MENU_KB)
-        return
-
-    # ── Payout Limits set ───────────────────────────────────────────
-    if mode == "set_payout_limits":
-        raw = (update.message.text or "").strip()
-        context.user_data["admin_mode"] = None
-        parts = raw.split()
-        try:
-            mn = int(parts[0])
-            mx = int(parts[1])
-            if mn < 1 or mx < mn:
-                raise ValueError
-            set_admin_setting("payout_min", str(mn))
-            set_admin_setting("payout_max", str(mx))
-            await update.message.reply_text(f"✅ Payout limits set:\nMin: ₹{mn}  |  Max: ₹{mx}", reply_markup=ADMIN_MENU_KB)
-        except Exception:
-            await update.message.reply_text("❌ Invalid. Send like: `55 2000`", parse_mode="Markdown", reply_markup=ADMIN_MENU_KB)
-        return
 
     # ── Block user with reason ──────────────────────────────────────
     if mode == "block_wait":
@@ -6026,7 +6445,9 @@ async def admin_content_handler(update: Update, context: ContextTypes.DEFAULT_TY
             f"Selected: {r['user_id']} | {r['username'] or ''}\n"
             f"Current MAIN ₹{float(r['main_balance']):.2f} | HOLD ₹{float(r['hold_balance']):.2f}\n\n"
             "Now send adjustment like:\n"
-            "+100 main\n-50 hold\n+10 hold\n-25 main"
+            "+100 main\n-50 hold\n+10 hold\n-25 main\n\n"
+            "Optional reason (add after amount):\n"
+            "+100 main Bonus reward\n-50 main Penalty"
         )
         return
 
@@ -6036,12 +6457,14 @@ async def admin_content_handler(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data["admin_mode"] = None
             await update.message.reply_text("No user selected.", reply_markup=ADMIN_MENU_KB)
             return
-        txt = (update.message.text or "").strip().lower()
-        m2 = re.match(r'^([\+\-])\s*(\d+(?:\.\d+)?)\s*(main|hold)\s*$', txt)
+        raw_input = (update.message.text or "").strip()
+        txt = raw_input.lower()
+        m2 = re.match(r'^([\+\-])\s*(\d+(?:\.\d+)?)\s*(main|hold)(?:\s+(.+))?$', raw_input, re.IGNORECASE)
         if not m2:
-            await update.message.reply_text("Format: +100 main OR -50 hold")
+            await update.message.reply_text("Format: +100 main OR -50 hold OR +100 main Bonus reward")
             return
-        sign, amt_s, which = m2.groups()
+        sign, amt_s, which, custom_reason = m2.groups()
+        which = which.lower()
         amt = float(amt_s)
         if sign == "-":
             amt = -amt
@@ -6067,15 +6490,38 @@ async def admin_content_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 await update.message.reply_text("❌ HOLD balance can't go negative.")
                 return
             cur.execute("UPDATE users SET hold_balance=? WHERE user_id=?", (nb, int(uid)))
+        # ── Ledger entry — reason ke saath ──────────────────────────────────
+        base_reason = f"Admin {'added' if amt >= 0 else 'deducted'} ₹{abs(amt):.2f} {which.upper()}"
+        reason_str = f"{base_reason} — {custom_reason.strip()}" if custom_reason else base_reason
+        if which == "main":
+            add_ledger_entry_cur(cur, int(uid), delta_main=float(amt), reason=reason_str)
+        else:
+            add_ledger_entry_cur(cur, int(uid), delta_hold=float(amt), reason=reason_str)
+
         con.commit()
         # show updated
         cur.execute("SELECT username, main_balance, hold_balance FROM users WHERE user_id=?", (int(uid),))
         r2 = cur.fetchone()
         con.close()
+        cache_invalidate_balance(uid)  # Admin ne balance change kiya — cache clear
+
+        sign_word = "Added" if amt >= 0 else "Deducted"
         await update.message.reply_text(
-            f"✅ Updated user {uid} ({r2['username'] or ''})\nMAIN ₹{float(r2['main_balance']):.2f} | HOLD ₹{float(r2['hold_balance']):.2f}",
+            f"✅ {sign_word} ₹{abs(amt):.2f} from {which.upper()} for user {uid} ({r2['username'] or ''})\n"
+            f"MAIN ₹{float(r2['main_balance']):.2f} | HOLD ₹{float(r2['hold_balance']):.2f}\n"
+            f"📒 Ledger entry saved.",
             reply_markup=ADMIN_MENU_KB
         )
+        # Notify user
+        try:
+            notif = (
+                f"💰 Your balance has been {'credited' if amt >= 0 else 'debited'} by admin.\n"
+                f"Amount: ₹{abs(amt):.2f} ({which.upper()})\n"
+                f"New MAIN balance: ₹{float(r2['main_balance']):.2f}"
+            )
+            await context.bot.send_message(chat_id=int(uid), text=notif)
+        except Exception:
+            pass
         # keep mode for more edits
         return
 
@@ -6747,9 +7193,15 @@ async def syncstat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ syncstat failed: {e!r}")
 
+_sweeper_notified = set()  # {hold_credit_id, ...} — processed hold ids track karo
+
 async def hold_sweeper_job(context: ContextTypes.DEFAULT_TYPE):
     """Automatically move matured HOLD -> MAIN (runs in background).
-    This makes the 'hold end' + main balance credit happen even if user is offline.
+    Also triggers task rewards + referral commission at Accepted moment.
+
+    FIXES:
+    - Bug 2: commission_pct sweeper mein alag se fetch nahi, move_matured se aata hai
+    - Error logging add kiya taaki silent failures na hon
     """
     def _work():
         now = int(time.time())
@@ -6761,22 +7213,60 @@ async def hold_sweeper_job(context: ContextTypes.DEFAULT_TYPE):
         )
         uids = [int(x["user_id"]) for x in cur.fetchall()]
         con.close()
-        moved_list = []
+        results = []
         for uid in uids:
             try:
-                amt = _db_write_retry(lambda: move_matured_hold_to_main(uid))
-                if amt and float(amt) > 0:
-                    moved_list.append((uid, float(amt)))
-            except Exception:
+                result = _db_write_retry(lambda u=uid: move_matured_hold_to_main(u))
+                amt, task_paid, ref_id, commission_amt = result
+                if float(amt) > 0:
+                    results.append((uid, float(amt), float(task_paid), ref_id, float(commission_amt)))
+            except Exception as _e:
+                import traceback
+                dprint(f"[SWEEPER] uid={uid} failed: {_e!r}\n{traceback.format_exc()}")
                 continue
-        return moved_list
+        return results
 
-    moved_list = await asyncio.to_thread(_work)
-    for uid, amt in moved_list:
+    results = await asyncio.to_thread(_work)
+
+    # Is sweeper run mein already notify kiye uids — same run mein spam rokne ke liye
+    _this_run_notified = set()
+
+    for uid, amt, task_paid, ref_id, commission_amt in results:
+        # Same sweeper run mein duplicate rokna
+        if uid in _this_run_notified:
+            continue
+        _this_run_notified.add(uid)
+        # User ko: balance accrual notification (sirf sweeper se — ek baar)
         try:
-            await context.bot.send_message(chat_id=int(uid), text="💸 Accrual of funds to the balance")
+            await context.bot.send_message(
+                chat_id=int(uid),
+                text=f"{tr(uid, 'accepted')}\n\n{tr(uid, 'funds_accrual')}"
+            )
         except Exception:
             pass
+        # User ko: task milestone reward notification
+        if task_paid > 0:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(uid),
+                    text=f"🎁 Task reward added to MAIN: ₹{int(task_paid)}"
+                )
+            except Exception:
+                pass
+        # Referrer ko: commission notification (commission_pct move_matured se hi aata hai)
+        if ref_id and commission_amt > 0:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(ref_id),
+                    text=(
+                        f"💸 Commission Earned!\n\n"
+                        f"Tumhara referral ka account 🟢 Accepted hua.\n"
+                        f"Commission: +₹{commission_amt:.2f} "
+                        f"credited to your Main Balance! 🎉"
+                    ),
+                )
+            except Exception:
+                pass
 
 
 async def _post_init(application: Application):
@@ -6796,10 +7286,17 @@ async def _post_init(application: Application):
         pass
 
     # Auto move matured HOLD -> MAIN (always)
-    try:
-        application.job_queue.run_repeating(hold_sweeper_job, interval=300, first=30)
-    except Exception:
-        pass
+    # job_queue ki jagah direct asyncio loop — apscheduler dependency nahi chahiye
+    async def _sweeper_loop():
+        await asyncio.sleep(30)  # bot start hone ke 30 sec baad pehli baar
+        while True:
+            try:
+                await hold_sweeper_job(application)
+            except Exception:
+                pass
+            await asyncio.sleep(300)  # har 5 min mein
+
+    asyncio.create_task(_sweeper_loop())
 
     try:
         if os.path.exists("token.json") or os.environ.get("GMAIL_TOKEN_JSON"):
@@ -6808,15 +7305,7 @@ async def _post_init(application: Application):
             asyncio.create_task(_gmail_sync_loop(poll_sec=poll_sec, max_list=max_list))
             dprint(f"[SYNC] scheduled gmail sync task (poll_sec={poll_sec}, max_list={max_list})")
 
-            global _otp_app_ref
-            _otp_app_ref = application
-            try:
-                otp_svc = _gmail_api_service()
-                otp_poll_sec = int(os.environ.get("OTP_POLL_SEC", "10"))
-                asyncio.create_task(_otp_sync_loop(otp_svc, poll_sec=otp_poll_sec))
-                dprint(f"[OTP-SYNC] scheduled otp sync task (poll_sec={otp_poll_sec})")
-            except Exception as oe:
-                dprint(f"[OTP-SYNC] failed to start: {oe!r}")
+
         else:
             dprint("[SYNC] not scheduled (missing GMAIL_TOKEN_JSON/token.json)")
     except Exception as e:
@@ -6861,7 +7350,131 @@ async def setcommission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+
+def _ensure_core_tables():
+    try:
+        import db_pg
+
+        if hasattr(db_pg, "init_db"):
+            db_pg.init_db()
+
+    except Exception:
+        pass
+
+
+
+async def bulk_txt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle .txt file upload for bulk Gmail submission."""
+    user = update.effective_user
+    if not user:
+        return
+    if user.id != ADMIN_ID and is_blocked(user.id):
+        return
+
+    state = context.user_data.get("sell_state")
+    if state != STATE_WAIT_BULK:
+        return  # Only handle in bulk state
+
+    try:
+        doc = update.message.document
+        if not doc or not doc.file_name.lower().endswith(".txt"):
+            return
+
+        if doc.file_size and doc.file_size > 500 * 1024:
+            await update.message.reply_text("❌ File too large. Max 500KB.", reply_markup=_sell_cancel_kb())
+            return
+
+        file = await doc.get_file()
+        file_bytes = await file.download_as_bytearray()
+        txt_content = file_bytes.decode("utf-8", errors="ignore")
+
+        accounts = _parse_bulk_accounts(txt_content)
+        if not accounts:
+            await update.message.reply_text(
+                "❌ Could not parse any accounts from file.\nFormat: email:password:recovery_email",
+                reply_markup=_sell_cancel_kb()
+            )
+            return
+
+        MAX_BULK = 50
+        if len(accounts) > MAX_BULK:
+            await update.message.reply_text(
+                f"❌ Maximum {MAX_BULK} accounts allowed. Your file has {len(accounts)}. Please split into smaller batches.",
+                reply_markup=_sell_cancel_kb()
+            )
+            return
+
+        now = int(time.time())
+        ok_count = 0
+        skip_count = 0
+        err_lines = []
+
+        for acc in accounts:
+            em = acc["email"].lower().strip()
+            pw = acc["password"].strip()
+            rv = acc["recovery_email"].lower().strip()
+            tf = acc.get("twofa", "").strip()
+
+            if not is_valid_email_syntax(em):
+                err_lines.append("Invalid email: " + em); skip_count += 1; continue
+            if not is_valid_email_syntax(rv):
+                err_lines.append("Invalid recovery: " + rv); skip_count += 1; continue
+            if em == rv:
+                err_lines.append("Email same as recovery: " + em); skip_count += 1; continue
+            if _email_exists_in_db(em):
+                err_lines.append("Already exists: " + em); skip_count += 1; continue
+            if _recovery_email_exists_in_db(rv):
+                err_lines.append("Recovery exists: " + rv); skip_count += 1; continue
+
+            try:
+                con = db(); cur = con.cursor()
+                cur.execute(
+                    "INSERT INTO registrations(user_id, email, password, recovery_email, twofa_key, created_at, state) VALUES(?,?,?,?,?,?,?)",
+                    (user.id, em, pw, rv, tf if tf else None, now, "created")
+                )
+                reg_id = cur.lastrowid
+                expires_at = now + ACTION_TIMEOUT_HOURS * 3600
+                cur.execute(
+                    "INSERT INTO actions(user_id, reg_id, created_at, expires_at, state) VALUES(?,?,?,?,?)",
+                    (user.id, reg_id, now, expires_at, "waiting_admin")
+                )
+                action_id = cur.lastrowid
+                con.commit(); con.close()
+                try:
+                    hid = add_hold_credit(user.id, float(PRE_CREDIT_AMOUNT))
+                    con2 = db(); cur2 = con2.cursor()
+                    cur2.execute(
+                        "INSERT INTO precredits(action_id, user_id, hold_credit_id, amount, created_at, reverted) VALUES(?,?,?,?,?,0)",
+                        (int(action_id), int(user.id), int(hid), float(PRE_CREDIT_AMOUNT), now)
+                    )
+                    con2.commit(); con2.close()
+                except Exception:
+                    pass
+                try:
+                    save_form_row(int(reg_id), int(user.id), "", em, pw, rv, now)
+                except Exception:
+                    pass
+                ok_count += 1
+            except Exception:
+                err_lines.append("DB error for " + em); skip_count += 1
+
+        msg = f"✅ {ok_count} account(s) submitted from file."
+        if skip_count:
+            msg += f"\n⚠️ {skip_count} skipped."
+        if err_lines:
+            msg += "\n" + "\n".join(err_lines[:10])
+
+        context.user_data.pop("sell_state", None)
+        context.user_data.pop("reg_flow", None)
+        temp_data.pop(user.id, None)
+        await update.message.reply_text(msg, reply_markup=main_menu_markup(user.id))
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error reading file: {e}", reply_markup=_sell_cancel_kb())
+
+
 def main():
+    print("[BOT] Starting...", flush=True)
     # Restore DB from Google Drive before initializing (best-effort)
     try:
         if _drive_enabled():
@@ -6870,8 +7483,44 @@ def main():
     except Exception:
         pass
 
-    init_db()
-    dprint(f"DB: {DB}")
+    print("[BOT] Initializing DB...", flush=True)
+    try:
+        init_db()
+    except Exception as _db_err:
+        print(f"[BOT] FATAL: init_db failed: {_db_err!r}", flush=True)
+        import traceback; traceback.print_exc()
+        raise
+    print(f"[BOT] DB OK: {DB[:40]}...", flush=True)
+
+    # Migration: add new columns to registrations table (twofa_key)
+    try:
+        _mig_con2 = db()
+        _mig_cur2 = _mig_con2.cursor()
+        for _col, _type in [("twofa_key", "TEXT")]:
+            try:
+                _mig_cur2.execute(f"ALTER TABLE registrations ADD COLUMN {_col} {_type}")
+                _mig_con2.commit()
+                dprint(f"[MIGRATION] registrations.{_col} added")
+            except Exception:
+                pass  # column already exists
+        _mig_con2.close()
+    except Exception as _mig2_err:
+        dprint(f"[MIGRATION] registrations migration error: {_mig2_err!r}")
+
+    # Migration: admin_settings defaults for reward toggles
+    try:
+        _mig_con3 = db()
+        _mig_cur3 = _mig_con3.cursor()
+        _mig_cur3.execute(
+            "INSERT OR IGNORE INTO admin_settings(key, value) VALUES('task_rewards','on')"
+        )
+        _mig_cur3.execute(
+            "INSERT OR IGNORE INTO admin_settings(key, value) VALUES('referral_rewards','on')"
+        )
+        _mig_con3.commit()
+        _mig_con3.close()
+    except Exception as _mig3_err:
+        dprint(f"[MIGRATION] admin_settings defaults error: {_mig3_err!r}")
 
     # Migration: referral_bonuses mein reg_id column add karo (agar nahi hai)
     # Yeh column per-registration deduplication ke liye zaroori hai
@@ -6894,7 +7543,7 @@ def main():
     except Exception as mig_err:
         dprint(f"[MIGRATION] referral_bonuses migration error: {mig_err!r}")
 
-
+    print("[BOT] Building application...", flush=True)
     app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
 
     # Commands
@@ -6926,6 +7575,10 @@ def main():
 
     # User menu handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler), group=3)
+    # QR photo handler for sell flow (2FA secret auto-extract)
+    app.add_handler(MessageHandler(filters.PHOTO, menu_handler), group=3)
+    # .txt file handler for bulk submission
+    app.add_handler(MessageHandler(filters.Document.FileExtension("txt"), bulk_txt_handler), group=3)
 
     # ✅ Gmail sync is scheduled in _post_init()
 
@@ -6939,27 +7592,24 @@ def main():
 
     # Railway built-in public domain (preferred). Fallback to manual variable if you set it.
     public_domain = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or os.environ.get("RAILWAY_STATIC_URL") or "").strip()
+    print(f"[BOT] public_domain={public_domain!r}", flush=True)
     if not public_domain:
-        # If no public domain is available (e.g., local run), fallback to polling
-        dprint("⚠️ No Railway public domain found; falling back to polling.")
-        app.run_polling(drop_pending_updates=True)
+        print("[BOT] No public domain — running polling mode", flush=True)
+        app.run_polling()
         return
 
-    # Your webhook path (must match what you set in setWebhook). Example: hook_92ks8s9d7sd
     url_path = (os.environ.get("WEBHOOK_PATH") or "").strip().lstrip("/")
     if not url_path:
-        # default to BOT_TOKEN (works as a secret path) if you didn't set WEBHOOK_PATH
         url_path = str(BOT_TOKEN).strip().lstrip("/")
 
     webhook_url = f"https://{public_domain}/{url_path}"
-    dprint("🌐 Webhook URL:", webhook_url)
+    print(f"[BOT] Webhook URL: https://{public_domain}/***", flush=True)
 
     app.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=url_path,
         webhook_url=webhook_url,
-        drop_pending_updates=True,
     )
 
 if __name__ == "__main__":

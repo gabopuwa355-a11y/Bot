@@ -40,6 +40,7 @@ import re
 import threading
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from psycopg2 import sql as pgsql
 
 # ── Connection string ────────────────────────────────────────────────────────
@@ -56,6 +57,23 @@ DB_WRITE_LOCK = threading.RLock()  # same name as in bot_app.py
 
 # Fake "DB" path string so any code that references DB doesn't crash
 DB = DATABASE_URL
+
+# ── Connection Pool (SPEED OPTIMIZATION) ────────────────────────────────────
+# Naya connection banana slow hai (~100-300ms). Pool se connection reuse hota hai.
+_pg_pool = None
+_pg_pool_lock = threading.Lock()
+
+def _get_pool():
+    global _pg_pool
+    if _pg_pool is None:
+        with _pg_pool_lock:
+            if _pg_pool is None:
+                _pg_pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn=2,
+                    maxconn=10,
+                    dsn=DATABASE_URL,
+                )
+    return _pg_pool
 
 
 # ── Compatibility shim: fake sqlite3 module ──────────────────────────────────
@@ -80,9 +98,17 @@ sqlite3 = _FakeSqlite3()
 
 # ── PostgreSQL connection ────────────────────────────────────────────────────
 def _pg_connect():
-    conn = psycopg2.connect(DATABASE_URL)
-    conn.autocommit = False
-    return _PgConnectionWrapper(conn)
+    """Pool se connection lo (naya banana sirf pehli baar ya pool exhausted hone pe)."""
+    try:
+        pool = _get_pool()
+        raw_conn = pool.getconn()
+        raw_conn.autocommit = False
+        return _PgConnectionWrapper(raw_conn, pooled=True)
+    except Exception:
+        # Pool fail hone par fallback: direct connection
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.autocommit = False
+        return _PgConnectionWrapper(conn, pooled=False)
 
 
 def db():
@@ -114,7 +140,7 @@ def db():
         elif txn_status == psycopg2.extensions.TRANSACTION_STATUS_UNKNOWN:
             # Dead connection — replace
             try:
-                raw.close()
+                conn.close()  # pool ko wapas karo
             except Exception:
                 pass
             _local.conn = _pg_connect()
@@ -123,7 +149,7 @@ def db():
     except Exception:
         # Any error inspecting the connection — replace it entirely
         try:
-            conn._raw.close()
+            conn.close()  # pool ko wapas karo
         except Exception:
             pass
         _local.conn = _pg_connect()
@@ -246,7 +272,7 @@ def _translate_insert_or_replace(sql: str) -> str:
         "admin_email_verify": "action_id",
         "form_table": "reg_id",
         "precredits": "action_id",
-        "referral_bonuses": "(referrer_id, referred_user_id)",
+        "referral_bonuses": "id",
         "admin_settings": "key",
         # email sync tables
         "email_cache":   "handle",
@@ -447,8 +473,9 @@ class PgCursorWrapper:
 
 # ── Connection wrapper ────────────────────────────────────────────────────────
 class _PgConnectionWrapper:
-    def __init__(self, raw_conn):
+    def __init__(self, raw_conn, pooled=False):
         self._raw = raw_conn
+        self._pooled = pooled
         # Use DictCursor so rows are dict-like
         self._raw.cursor_factory = psycopg2.extras.RealDictCursor
         self.closed = False
@@ -477,11 +504,29 @@ class _PgConnectionWrapper:
             pass
 
     def close(self):
+        """Connection close: pool se liya tha toh pool ko wapas do (SPEED OPTIMIZATION)."""
+        if self.closed:
+            return
         try:
-            self._raw.close()
+            if self._pooled:
+                try:
+                    self._raw.rollback()  # Clean state before returning to pool
+                except Exception:
+                    pass
+                pool = _get_pool()
+                pool.putconn(self._raw)
+            else:
+                self._raw.close()
             self.closed = True
         except Exception:
-            pass
+            try:
+                self._raw.close()
+            except Exception:
+                pass
+            self.closed = True
+        # Thread-local reference hata do
+        if getattr(_local, "conn", None) is self:
+            _local.conn = None
 
     def __enter__(self):
         return self
@@ -494,16 +539,54 @@ class _PgConnectionWrapper:
         self.close()
 
 
+# ── Migration helper — always uses a FRESH connection ────────────────────────
+def _run_migration(sql: str):
+    """
+    Run a single ALTER TABLE (or any DDL migration) on a brand-new connection.
+    Errors (column/constraint already exists) are silently swallowed.
+    A fresh connection guarantees that a rollback here cannot corrupt the
+    CREATE TABLE transaction running on the main init_db connection.
+    """
+    try:
+        mcon = _pg_connect()
+        try:
+            mcur = mcon.cursor()
+            mcur.execute(sql)
+            mcon.commit()
+        except Exception:
+            try:
+                mcon.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                mcon.close()
+            except Exception:
+                pass
+    except Exception:
+        pass  # pool exhausted edge-case — skip migration, table already has column
+
+
 # ── init_db() — same tables, PostgreSQL syntax ───────────────────────────────
 def init_db():
     """
     Create all tables in PostgreSQL.
     Idempotent — safe to run on every startup.
+
+    KEY DESIGN RULE:
+      - Every CREATE TABLE is committed immediately after execution on the
+        main connection.  This means a later rollback (e.g. from a migration)
+        can never undo an already-committed table creation.
+      - All ALTER TABLE migrations run via _run_migration() which uses its own
+        fresh connection, so a rollback there is completely isolated.
     """
+    print("[init_db] Connecting to DB...", flush=True)
     con = db()
     cur = con.cursor()
+    print("[init_db] Connected OK", flush=True)
 
     # ── users ────────────────────────────────────────────────────────────────
+    print("[init_db] Creating table: users", flush=True)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users(
         user_id BIGINT PRIMARY KEY,
@@ -517,7 +600,9 @@ def init_db():
         currency TEXT DEFAULT 'INR'
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: blocked_users", flush=True)
     # ── blocked_users ────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS blocked_users(
@@ -526,13 +611,11 @@ def init_db():
         reason TEXT DEFAULT ''
     )
     """)
+    con.commit()
     # Migration: add reason column if older DB doesn't have it
-    try:
-        cur.execute("ALTER TABLE blocked_users ADD COLUMN reason TEXT DEFAULT ''")
-        con.commit()
-    except Exception:
-        con.rollback()
+    _run_migration("ALTER TABLE blocked_users ADD COLUMN reason TEXT DEFAULT ''")
 
+    print("[init_db] Creating table: pending_referrals", flush=True)
     # ── pending_referrals ────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS pending_referrals(
@@ -541,7 +624,9 @@ def init_db():
         created_at BIGINT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: referral_bonuses", flush=True)
     # ── referral_bonuses ─────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS referral_bonuses(
@@ -550,10 +635,17 @@ def init_db():
         referred_user_id BIGINT,
         amount DOUBLE PRECISION,
         created_at BIGINT,
-        UNIQUE(referrer_id, referred_user_id)
+        reg_id BIGINT DEFAULT NULL
     )
     """)
+    con.commit()
+    _run_migration("ALTER TABLE referral_bonuses ADD COLUMN reg_id BIGINT DEFAULT NULL")
+    _run_migration("""
+        ALTER TABLE referral_bonuses
+        DROP CONSTRAINT IF EXISTS referral_bonuses_referrer_id_referred_user_id_key
+    """)
 
+    print("[init_db] Creating table: task_rewards", flush=True)
     # ── task_rewards ─────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS task_rewards(
@@ -564,7 +656,9 @@ def init_db():
         PRIMARY KEY(user_id, milestone)
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: rate", flush=True)
     # ── rate ─────────────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS rate(
@@ -574,7 +668,9 @@ def init_db():
         PRIMARY KEY(user_id, minute_key)
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: registrations", flush=True)
     # ── registrations ────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS registrations(
@@ -591,10 +687,14 @@ def init_db():
         msg_id BIGINT,
         task_id TEXT,
         status TEXT DEFAULT 'created',
-        state TEXT DEFAULT 'created'
+        state TEXT DEFAULT 'created',
+        twofa_key TEXT DEFAULT NULL
     )
     """)
+    con.commit()
+    _run_migration("ALTER TABLE registrations ADD COLUMN twofa_key TEXT DEFAULT NULL")
 
+    print("[init_db] Creating table: actions", flush=True)
     # ── actions ──────────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS actions(
@@ -607,7 +707,9 @@ def init_db():
         state TEXT DEFAULT 'shown'
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: hold_credits", flush=True)
     # ── hold_credits ─────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS hold_credits(
@@ -619,7 +721,9 @@ def init_db():
         moved INTEGER DEFAULT 0
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: precredits", flush=True)
     # ── precredits ───────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS precredits(
@@ -631,7 +735,9 @@ def init_db():
         reverted INTEGER DEFAULT 0
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: payouts", flush=True)
     # ── payouts ──────────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS payouts(
@@ -648,7 +754,9 @@ def init_db():
         refunded INTEGER DEFAULT 0
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: payout_proofs", flush=True)
     # ── payout_proofs ────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS payout_proofs(
@@ -661,7 +769,9 @@ def init_db():
         created_at BIGINT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: form_table", flush=True)
     # ── form_table ───────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS form_table(
@@ -672,12 +782,17 @@ def init_db():
         email TEXT,
         password TEXT,
         recovery_email TEXT,
+        twofa_key TEXT DEFAULT '',
         extra_data TEXT,
         msg_id BIGINT,
         created_at BIGINT
     )
     """)
+    con.commit()
+    # Migration: add twofa_key if older DB doesn't have it
+    _run_migration("ALTER TABLE form_table ADD COLUMN twofa_key TEXT DEFAULT ''")
 
+    print("[init_db] Creating table: autoreply", flush=True)
     # ── autoreply ────────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS autoreply(
@@ -692,10 +807,12 @@ def init_db():
         button_url TEXT DEFAULT ''
     )
     """)
+    con.commit()
     cur.execute("""
     INSERT INTO autoreply(id, enabled, text) VALUES(1,0,'')
     ON CONFLICT(id) DO NOTHING
     """)
+    con.commit()
     # Migration: add missing columns for existing autoreply tables (older deployments)
     for _col, _def in [
         ("reply_kind",  "TEXT DEFAULT 'text'"),
@@ -705,12 +822,10 @@ def init_db():
         ("button_text", "TEXT DEFAULT ''"),
         ("button_url",  "TEXT DEFAULT ''"),
     ]:
-        try:
-            cur.execute(f"ALTER TABLE autoreply ADD COLUMN {_col} {_def}")
-            con.commit()
-        except Exception:
-            con.rollback()
+        _run_migration(f"ALTER TABLE autoreply ADD COLUMN {_col} {_def}")
+    print("[init_db] autoreply OK", flush=True)
 
+    print("[init_db] Creating table: device_logs", flush=True)
     # ── device_logs ──────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS device_logs(
@@ -722,7 +837,9 @@ def init_db():
         last_chat_type TEXT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: user_locations", flush=True)
     # ── user_locations ───────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS user_locations(
@@ -732,7 +849,9 @@ def init_db():
         updated_at BIGINT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: device_fingerprints", flush=True)
     # ── device_fingerprints ──────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS device_fingerprints(
@@ -755,7 +874,9 @@ def init_db():
         verified_at BIGINT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: ledger", flush=True)
     # ── ledger ───────────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS ledger(
@@ -767,7 +888,9 @@ def init_db():
         created_at BIGINT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: admin_email_verify", flush=True)
     # ── admin_email_verify ───────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS admin_email_verify(
@@ -779,20 +902,15 @@ def init_db():
     )
     """)
     # Migration: add columns that may be missing in older deployments.
-    # These are referenced by LEFT JOIN in menu_accounts SELECT; missing columns
-    # cause UndefinedColumn -> silent rollback -> fetchall returns [] -> "No account history".
     for _col, _def in [
         ("decided_by",  "BIGINT"),
         ("status",      "TEXT"),
         ("reason",      "TEXT"),
         ("decided_at",  "BIGINT"),
     ]:
-        try:
-            cur.execute(f"ALTER TABLE admin_email_verify ADD COLUMN {_col} {_def}")
-            con.commit()
-        except Exception:
-            con.rollback()
+        _run_migration(f"ALTER TABLE admin_email_verify ADD COLUMN {_col} {_def}")
 
+    print("[init_db] Creating table: email_checks", flush=True)
     # ── email_checks ─────────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS email_checks(
@@ -805,7 +923,9 @@ def init_db():
         created_at BIGINT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: jobs", flush=True)
     # ── jobs (userbot IPC queue) ─────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS jobs(
@@ -819,7 +939,9 @@ def init_db():
         error TEXT DEFAULT ''
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: admin_settings", flush=True)
     # ── admin_settings ───────────────────────────────────────────────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS admin_settings(
@@ -828,7 +950,9 @@ def init_db():
         updated_at BIGINT
     )
     """)
+    con.commit()
 
+    print("[init_db] Creating table: email_cache", flush=True)
     # ── email_cache / email_meta / otp_inbox (gmail sync tables) ────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS email_cache(
@@ -855,4 +979,40 @@ def init_db():
     """)
 
     con.commit()
-        
+
+    # ── Fix: created_at / blocked_at columns that were created as TIMESTAMPTZ ──
+    # Older deployments may have these as TIMESTAMPTZ instead of BIGINT.
+    # We cast them to BIGINT (Unix epoch seconds) so integer inserts work.
+    _ts_fix_tables = [
+        ("users",            "created_at"),
+        ("blocked_users",    "blocked_at"),
+        ("pending_referrals","created_at"),
+        ("referral_bonuses", "created_at"),
+        ("registrations",    "created_at"),
+        ("registrations",    "updated_at"),
+        ("actions",          "created_at"),
+        ("actions",          "updated_at"),
+        ("actions",          "expires_at"),
+        ("hold_credits",     "created_at"),
+        ("hold_credits",     "matured_at"),
+        ("precredits",       "created_at"),
+        ("payouts",          "created_at"),
+        ("payout_proofs",    "created_at"),
+        ("form_table",       "created_at"),
+        ("ledger",           "created_at"),
+        ("email_checks",     "created_at"),
+        ("jobs",             "created_at"),
+        ("jobs",             "updated_at"),
+        ("admin_settings",   "updated_at"),
+        ("device_fingerprints", "updated_at"),
+        ("device_fingerprints", "verified_at"),
+        ("user_locations",   "updated_at"),
+    ]
+    for _tbl, _col in _ts_fix_tables:
+        _run_migration(
+            f"ALTER TABLE {_tbl} ALTER COLUMN {_col} TYPE BIGINT "
+            f"USING EXTRACT(EPOCH FROM {_col})::BIGINT"
+        )
+
+    print("[init_db] All tables created/verified OK", flush=True)
+    con.close()
